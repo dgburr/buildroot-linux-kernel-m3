@@ -1040,8 +1040,9 @@ static void aml_pcm_free_dma_buffers(struct snd_pcm *pcm)
 }
 
 #ifdef CONFIG_PM
-static int aml_pcm_suspend(struct snd_soc_dai *dai)
+static int aml_pcm_suspend(struct snd_soc_dai_link *dai_link)
 {
+#if 0
 	struct snd_pcm_runtime *runtime = dai->runtime;
 	struct aml_runtime_data *prtd;
 	struct aml_pcm_dma_params *params;
@@ -1050,6 +1051,7 @@ static int aml_pcm_suspend(struct snd_soc_dai *dai)
 
 	prtd = runtime->private_data;
 	params = prtd->params;
+#endif
 
 	/* disable the PDC and save the PDC registers */
 	// TODO
@@ -1058,8 +1060,9 @@ static int aml_pcm_suspend(struct snd_soc_dai *dai)
 	return 0;
 }
 
-static int aml_pcm_resume(struct snd_soc_dai *dai)
+static int aml_pcm_resume(struct snd_soc_dai_link *dai_link)
 {
+#if 0
 	struct snd_pcm_runtime *runtime = dai->runtime;
 	struct aml_runtime_data *prtd;
 	struct aml_pcm_dma_params *params;
@@ -1068,6 +1071,7 @@ static int aml_pcm_resume(struct snd_soc_dai *dai)
 
 	prtd = runtime->private_data;
 	params = prtd->params;
+#endif
 
 	/* restore the PDC registers and enable the PDC */
 	// TODO

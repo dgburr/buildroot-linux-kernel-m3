@@ -289,7 +289,7 @@ static void kill_urbs_in_qh_list(dwc_otg_hcd_t * _hcd,
 			    list_entry(qtd_item, dwc_otg_qtd_t, qtd_list_entry);
 			if (qtd->urb != NULL) {
 				dwc_otg_hcd_complete_urb(_hcd, qtd->urb,
-							 -ESHUTDOWN);
+							 -ETIMEDOUT);
 			}
 			dwc_otg_hcd_qtd_remove_and_free(qtd);
 		}
@@ -398,8 +398,6 @@ static int32_t dwc_otg_hcd_disconnect_cb(void *_p)
 			}
 		}
 
-		/* release_channel by hand */
-		local_irq_save(flags);
 		for (i = 0; i < num_channels; i++) {
 			channel = dwc_otg_hcd->hc_ptr_array[i];
 			if (list_empty(&channel->hc_list_entry)) {
@@ -418,25 +416,20 @@ static int32_t dwc_otg_hcd_disconnect_cb(void *_p)
 						   channel);
 				list_add_tail(&channel->hc_list_entry,
 					      &dwc_otg_hcd->free_hc_list);
-				/* 
-				  * Take back the non_periodic_channel 
-				  * and periodic_channels
-				  */
+				local_irq_save(flags);
+				/* Take back a non_periodic_channel */
 				switch (channel->ep_type) {
 					case DWC_OTG_EP_TYPE_CONTROL:
 					case DWC_OTG_EP_TYPE_BULK:
 							dwc_otg_hcd->non_periodic_channels--;
 						break;
-					case DWC_OTG_EP_TYPE_ISOC:
-					case DWC_OTG_EP_TYPE_INTR:
-							dwc_otg_hcd->periodic_channels--;
-						break;
+
 					default:
 						break;
 				}
+				local_irq_restore(flags);
 			}
 		}
-		local_irq_restore(flags);
 	}
 
 	/* A disconnect will end the session so the B-Device is no
@@ -1219,7 +1212,7 @@ int dwc_otg_hcd_urb_dequeue(struct usb_hcd *_hcd, struct urb *_urb)
 		/* The QTD is in process (it has been assigned to a channel). */
 
 			if (dwc_otg_hcd->flags.b.port_connect_status) {
-			/* 
+			/*
 			 * Waitting for host core halt the channel by itself
 			 */
 			mdelay(1);
@@ -2155,9 +2148,9 @@ int dwc_otg_hcd_hub_control(struct usb_hcd *_hcd,
 			port_status |= (1 << USB_PORT_FEAT_POWER);
 
 		if (hprt0.b.prtspd == DWC_HPRT0_PRTSPD_HIGH_SPEED)
-			port_status |= (1 << USB_PORT_FEAT_HIGHSPEED);
+			port_status |= (USB_PORT_STAT_HIGH_SPEED);
 		else if (hprt0.b.prtspd == DWC_HPRT0_PRTSPD_LOW_SPEED)
-			port_status |= (1 << USB_PORT_FEAT_LOWSPEED);
+			port_status |= (USB_PORT_STAT_LOW_SPEED);
 
 		if (hprt0.b.prttstctl)
 			port_status |= (1 << USB_PORT_FEAT_TEST);

@@ -693,9 +693,7 @@ static int aml_m3_codec_hw_params(struct snd_pcm_substream *substream,
 			    struct snd_pcm_hw_params *params,
 			    struct snd_soc_dai *dai)
 {
-	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_device *socdev = rtd->socdev;
-	struct snd_soc_codec *codec = socdev->card->codec;
+    struct snd_soc_codec *codec = dai->codec;
     unsigned int i2sfs;
     unsigned long rate = params_rate(params);
     int rate_idx = 0;
@@ -730,9 +728,7 @@ static int aml_m3_codec_pcm_prepare(struct snd_pcm_substream *substream,
 static void aml_m3_codec_shutdown(struct snd_pcm_substream *substream,
 			    struct snd_soc_dai *dai)
 {
-	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_device *socdev = rtd->socdev;
-	struct snd_soc_codec *codec = socdev->card->codec;
+	struct snd_soc_codec *codec = dai->codec;
 	/* deactivate */
 	if (!codec->active) {
 		udelay(50);
@@ -762,11 +758,8 @@ static int aml_m3_codec_mute(struct snd_soc_dai *dai, int mute)
 static int aml_m3_codec_set_dai_sysclk(struct snd_soc_dai *codec_dai,
 		int clk_id, unsigned int freq, int dir)
 {
-	struct snd_soc_codec *codec = codec_dai->codec;
-	struct aml_m3_codec_priv *aml = codec->private_data;
 	unsigned long data = 0;
 	
-	aml->sysclk = freq;
 	switch (freq) {
 	case 32000:
 		data = 6;
@@ -997,7 +990,6 @@ static int aml_m3_register(struct aml_m3_codec_priv* aml_m3)
 
 	codec->name = "AML_M3_CODEC";
 	codec->owner = THIS_MODULE;
-	codec->private_data = aml_m3;
 
 	codec->dai = &aml_m3_codec_dai;
 	codec->num_dai = 1;
