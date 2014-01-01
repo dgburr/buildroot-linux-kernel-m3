@@ -131,8 +131,7 @@ static inline void spidelay(int nsecs)
 	while(nsecs--) {}
 }
 
-#define	EXPAND_BITBANG_TXRX
-#include <linux/spi/spi_bitbang.h>
+#include "spi_bitbang_txrx.h"
 
 /*
  * These functions can leverage inline expansion of GPIO calls to shrink
