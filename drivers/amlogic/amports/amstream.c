@@ -29,6 +29,7 @@
 #include <linux/mm.h>
 #include <linux/major.h>
 #include <linux/sched.h>
+#include <linux/interrupt.h>
 #include <linux/amports/amstream.h>
 #include <linux/amports/vformat.h>
 #include <linux/amports/aformat.h>
@@ -47,7 +48,9 @@
 #include <linux/poll.h>
 #include <linux/dma-mapping.h>
 #include <asm/uaccess.h>
-
+#ifdef CONFIG_ARCH_MESON6
+#include <mach/mod_gate.h>
+#endif
 #include "streambuf.h"
 #include "streambuf_reg.h"
 #include "tsdemux.h"
@@ -61,7 +64,7 @@
 #define DRIVER_NAME "amstream"
 #define MODULE_NAME "amstream"
 
-#define MAX_PORT_NUM ARRAY_SIZE(ports)
+#define MAX_AMSTREAM_PORT_NUM ARRAY_SIZE(ports)
 
 extern void set_real_audio_info(void *arg);
 //#define DATA_DEBUG
@@ -94,8 +97,8 @@ void debug_file_write(const char __user *buf, size_t count)
 #endif
 
 #define DEFAULT_VIDEO_BUFFER_SIZE       (1024*1024*3)
-#define DEFAULT_AUDIO_BUFFER_SIZE       (1024*384*2)
-#define DEFAULT_SUBTITLE_BUFFER_SIZE     (1024*1024*4)
+#define DEFAULT_AUDIO_BUFFER_SIZE       (1024*384)
+#define DEFAULT_SUBTITLE_BUFFER_SIZE     (1024*128)
 #if 0
 static ulong vbuf_start;
 module_param(vbuf_start, ulong, 0644);
@@ -139,8 +142,8 @@ static int amstream_open
 (struct inode *inode, struct file *file);
 static int amstream_release
 (struct inode *inode, struct file *file);
-static int amstream_ioctl
-(struct inode *inode, struct file *file,
+static long amstream_ioctl
+(struct file *file,
  unsigned int cmd, ulong arg);
 static ssize_t amstream_vbuf_write
 (struct file *file, const char *buf,
@@ -177,7 +180,7 @@ const static struct file_operations vbuf_fops = {
     .open     = amstream_open,
     .release  = amstream_release,
     .write    = amstream_vbuf_write,
-    .ioctl    = amstream_ioctl,
+    .unlocked_ioctl    = amstream_ioctl,
 };
 
 const static struct file_operations abuf_fops = {
@@ -185,7 +188,7 @@ const static struct file_operations abuf_fops = {
     .open     = amstream_open,
     .release  = amstream_release,
     .write    = amstream_abuf_write,
-    .ioctl    = amstream_ioctl,
+    .unlocked_ioctl    = amstream_ioctl,
 };
 
 const static struct file_operations mpts_fops = {
@@ -193,7 +196,7 @@ const static struct file_operations mpts_fops = {
     .open     = amstream_open,
     .release  = amstream_release,
     .write    = amstream_mpts_write,
-    .ioctl    = amstream_ioctl,
+    .unlocked_ioctl    = amstream_ioctl,
 };
 
 const static struct file_operations mpps_fops = {
@@ -201,7 +204,7 @@ const static struct file_operations mpps_fops = {
     .open     = amstream_open,
     .release  = amstream_release,
     .write    = amstream_mpps_write,
-    .ioctl    = amstream_ioctl,
+    .unlocked_ioctl    = amstream_ioctl,
 };
 
 const static struct file_operations mprm_fops = {
@@ -209,7 +212,7 @@ const static struct file_operations mprm_fops = {
     .open     = amstream_open,
     .release  = amstream_release,
     .write    = amstream_mprm_write,
-    .ioctl    = amstream_ioctl,
+    .unlocked_ioctl    = amstream_ioctl,
 };
 
 const static struct file_operations sub_fops = {
@@ -217,7 +220,7 @@ const static struct file_operations sub_fops = {
     .open     = amstream_open,
     .release  = amstream_release,
     .write    = amstream_sub_write,
-    .ioctl    = amstream_ioctl,
+    .unlocked_ioctl    = amstream_ioctl,
 };
 
 const static struct file_operations sub_read_fops = {
@@ -226,14 +229,14 @@ const static struct file_operations sub_read_fops = {
     .release  = amstream_release,
     .read     = amstream_sub_read,
     .poll     = amstream_sub_poll,
-    .ioctl    = amstream_ioctl,
+    .unlocked_ioctl    = amstream_ioctl,
 };
 
 const static struct file_operations amstream_fops = {
     .owner    = THIS_MODULE,
     .open     = amstream_open,
     .release  = amstream_release,
-    .ioctl    = amstream_ioctl,
+    .unlocked_ioctl    = amstream_ioctl,
 };
 
 /**************************************************/
@@ -245,7 +248,6 @@ static DEFINE_MUTEX(amstream_mutex);
 atomic_t subdata_ready = ATOMIC_INIT(0);
 static int sub_type;
 static int sub_port_inited;
-static unsigned karaok_flag;
 /* wait queue for poll */
 static wait_queue_head_t amstream_sub_wait;
 
@@ -341,8 +343,6 @@ static  void video_port_release(stream_port_t *port, struct stream_buf_s * pbuf,
     case 1:
         ;
     }
-
-    karaok_flag = 0;
     return ;
 }
 static  int video_port_init(stream_port_t *port, struct stream_buf_s * pbuf)
@@ -486,7 +486,6 @@ static  int audio_port_init(stream_port_t *port, struct stream_buf_s * pbuf)
     if (r < 0) {
         return r;
     }
-
     r = adec_init(port);
     if (r < 0) {
         audio_port_release(port, pbuf, 2);
@@ -874,7 +873,12 @@ static int amstream_open(struct inode *inode, struct file *file)
     stream_port_t *s;
     stream_port_t *this = &ports[iminor(inode)];
 
-    if (iminor(inode) >= MAX_PORT_NUM) {
+#ifdef CONFIG_ARCH_MESON6
+    switch_mod_gate_by_name("audio", 1);
+    switch_mod_gate_by_name("vdec", 1);
+#endif
+
+    if (iminor(inode) >= MAX_AMSTREAM_PORT_NUM) {
         return (-ENODEV);
     }
 
@@ -883,7 +887,7 @@ static int amstream_open(struct inode *inode, struct file *file)
     }
 
     /* check other ports conflict */
-    for (s = &ports[0], i = 0; i < MAX_PORT_NUM; i++, s++) {
+    for (s = &ports[0], i = 0; i < MAX_AMSTREAM_PORT_NUM; i++, s++) {
         if ((s->flag & PORT_FLAG_IN_USE) &&
             ((this->type) & (s->type) & (PORT_TYPE_VIDEO | PORT_TYPE_AUDIO))) {
             return (-EBUSY);
@@ -913,7 +917,7 @@ static int amstream_release(struct inode *inode, struct file *file)
 {
     stream_port_t *this = &ports[iminor(inode)];
 
-    if (iminor(inode) >= MAX_PORT_NUM) {
+    if (iminor(inode) >= MAX_AMSTREAM_PORT_NUM) {
         return (-ENODEV);
     }
     if (this->flag & PORT_FLAG_INITED) {
@@ -921,8 +925,8 @@ static int amstream_release(struct inode *inode, struct file *file)
     }
     this->flag = 0;
 
-    timestamp_pcrscr_set(0);
-    
+    ///timestamp_pcrscr_set(0);
+
 #ifdef DATA_DEBUG
     if (debug_filp) {
         filp_close(debug_filp, current->files);
@@ -931,13 +935,19 @@ static int amstream_release(struct inode *inode, struct file *file)
     }
 #endif
 
+#ifdef CONFIG_ARCH_MESON6
+    switch_mod_gate_by_name("audio", 0);
+    switch_mod_gate_by_name("vdec", 0);
+#endif 
+
     return 0;
 }
 
-static int amstream_ioctl(struct inode *inode, struct file *file,
+static long amstream_ioctl(struct file *file,
                           unsigned int cmd, ulong arg)
 {
     s32 r = 0;
+    struct inode *inode = file->f_dentry->d_inode;
     stream_port_t *this = &ports[iminor(inode)];
 
     switch (cmd) {
@@ -1079,16 +1089,9 @@ static int amstream_ioctl(struct inode *inode, struct file *file,
 
     case AMSTREAM_IOC_SYSINFO:
         if (this->type & PORT_TYPE_VIDEO) {
-            copy_from_user((void *)&amstream_dec_info, (void *)arg, sizeof(amstream_dec_info));
-            printk("amstream_dec_info.format(0x%x)\n", amstream_dec_info.format);
-            printk("amstream_dec_info.width (0x%x)\n", amstream_dec_info.width);
-            printk("amstream_dec_info.height(0x%x)\n", amstream_dec_info.height);
-            printk("amstream_dec_info.rate  (0x%x)\n", amstream_dec_info.rate);
-            printk("amstream_dec_info.extra (0x%x)\n", amstream_dec_info.extra);
-            printk("amstream_dec_info.status(0x%x)\n", amstream_dec_info.status);
-            printk("amstream_dec_info.ratio (0x%x)\n", amstream_dec_info.ratio);
-            printk("amstream_dec_info.param (0x%p)\n", amstream_dec_info.param);
-            printk("amstream_dec_info.ratio64(0x%llx)\n", amstream_dec_info.ratio64);
+            if (copy_from_user((void *)&amstream_dec_info, (void *)arg, sizeof(amstream_dec_info))) {
+                r = -EFAULT;
+            }
         } else {
             r = -EINVAL;
         }
@@ -1195,7 +1198,9 @@ static int amstream_ioctl(struct inode *inode, struct file *file,
     case AMSTREAM_IOC_AUDIO_INFO:
 
         if ((this->type & PORT_TYPE_VIDEO) || (this->type & PORT_TYPE_AUDIO)) {
-            copy_from_user(&audio_dec_info, (void __user *)arg, sizeof(audio_dec_info));
+            if (copy_from_user(&audio_dec_info, (void __user *)arg, sizeof(audio_dec_info))) {
+                r = -EFAULT;
+            }
         } else {
             r = -EINVAL;
         }
@@ -1258,23 +1263,6 @@ static int amstream_ioctl(struct inode *inode, struct file *file,
         sub_type = (int)arg;
         break;
 
-    case AMSTREAM_IOC_APTS_LOOKUP:
-	     if (this->type & PORT_TYPE_AUDIO)
-	     {
-		      u32 pts=0,offset;
-		      offset=*((u32 *)arg);
-		      pts_lookup_offset(PTS_TYPE_AUDIO, offset, &pts, 300);
-		      *((u32 *)arg)=pts;
-		 }
-		 return 0;
-    case GET_FIRST_APTS_FLAG:
-        if (this->type & PORT_TYPE_AUDIO)
-        {
-            unsigned long *val=(unsigned long *)arg;
-            *val = first_pts_checkin_complete(PTS_TYPE_AUDIO);
-        }
-        break;
-
     case AMSTREAM_IOC_APTS:
         *((u32 *)arg) = timestamp_apts_get();
         break;
@@ -1300,20 +1288,24 @@ static int amstream_ioctl(struct inode *inode, struct file *file,
             struct subtitle_info msub_info[MAX_SUB_NUM];
             struct subtitle_info *psub_info[MAX_SUB_NUM];
             int i;
+
             for (i = 0; i < MAX_SUB_NUM; i ++) {
                 psub_info[i] = &msub_info[i];
             }					
+
             r = psparser_get_sub_info(psub_info);
+
             if(r == 0) {
-                copy_to_user((void __user *)arg, msub_info, sizeof(struct subtitle_info) * MAX_SUB_NUM);
+                if (copy_to_user((void __user *)arg, msub_info, sizeof(struct subtitle_info) * MAX_SUB_NUM)) {
+                    r = -EFAULT;
+                }
             }
         }
         break;
-    case AMSTREAM_IOC_SET_DEMUX:
-        tsdemux_set_demux((int)arg);
-        break;
+
     default:
         r = -ENOIOCTLCMD;
+        break;
     }
 
     return r;
@@ -1422,6 +1414,7 @@ static ssize_t bufs_show(struct class *class, struct class_attribute *attr, char
             pbuf += sprintf(pbuf, "\tbuf regbase:%#lx\n", p->reg_base);
             pbuf += sprintf(pbuf, "\tbuf level:%#x\n", stbuf_level(p));
             pbuf += sprintf(pbuf, "\tbuf space:%#x\n", stbuf_space(p));
+			pbuf += sprintf(pbuf, "\tbuf read pointer:%#x\n", stbuf_rp(p));
         } else {
             u32 sub_wp, sub_rp, data_size;
             sub_wp = stbuf_sub_wp_get();
@@ -1452,40 +1445,17 @@ static ssize_t vcodec_profile_show(struct class *class,
 	return vcodec_profile_read(buf);
 }
 
-static ssize_t show_karaok(struct class *class, struct class_attribute *attr, char *buf)
-{
-    if(karaok_flag) {
-        return sprintf(buf, "1: enable\n");
-    }
-
-    return sprintf(buf, "0: disable\n");
-}
-
-static ssize_t store_karaok(struct class *class, struct class_attribute *attr, const char *buf, size_t size)
-{
-    unsigned val;
-    ssize_t ret;
-
-    ret = sscanf(buf, "%d", &val);
-    if(ret != 1) {
-        return -EINVAL;
-    }
-
-    karaok_flag = val ? 1 : 0;
-    return size;
-}
-
 static struct class_attribute amstream_class_attrs[] = {
     __ATTR_RO(ports),
     __ATTR_RO(bufs),
     __ATTR_RO(vcodec_profile),   
-    __ATTR(karaok, S_IRUGO | S_IWUGO, show_karaok,  store_karaok),
     __ATTR_NULL
 };
 static struct class amstream_class = {
         .name = "amstream",
         .class_attrs = amstream_class_attrs,
     };
+
 static int  amstream_probe(struct platform_device *pdev)
 {
     int i;
@@ -1522,7 +1492,7 @@ static int  amstream_probe(struct platform_device *pdev)
 
     amstream_dev_class = class_create(THIS_MODULE, DEVICE_NAME);
 
-    for (st = &ports[0], i = 0; i < MAX_PORT_NUM; i++, st++) {
+    for (st = &ports[0], i = 0; i < MAX_AMSTREAM_PORT_NUM; i++, st++) {
         st->class_dev = device_create(amstream_dev_class, NULL,
                                       MKDEV(AMSTREAM_MAJOR, i), NULL,
                                       ports[i].name);
@@ -1588,7 +1558,7 @@ error5:
 error4:
     tsdemux_class_unregister();
 error3:
-    for (st = &ports[0], i = 0; i < MAX_PORT_NUM; i++, st++) {
+    for (st = &ports[0], i = 0; i < MAX_AMSTREAM_PORT_NUM; i++, st++) {
         device_destroy(amstream_dev_class, MKDEV(AMSTREAM_MAJOR, i));
     }
     class_destroy(amstream_dev_class);
@@ -1611,7 +1581,7 @@ static int  amstream_remove(struct platform_device *pdev)
     }
     stbuf_fetch_release();
     tsdemux_class_unregister();
-    for (st = &ports[0], i = 0; i < MAX_PORT_NUM; i++, st++) {
+    for (st = &ports[0], i = 0; i < MAX_AMSTREAM_PORT_NUM; i++, st++) {
         device_destroy(amstream_dev_class, MKDEV(AMSTREAM_MAJOR, i));
     }
 
@@ -1682,7 +1652,7 @@ static struct platform_driver
     .probe      = amstream_probe,
     .remove     = amstream_remove,
     .driver     = {
-        .name   = "amstream",
+        .name   = "mesonstream",
     }
 };
 

@@ -71,3 +71,7 @@ extern unsigned sdio_check_interrupt(void);
 extern void sdio_close_host_interrupt(unsigned int_resource);
 /*@}*/
 #endif // CARD__READER_H
+
+#include <linux/blkdev.h>
+#define blk_pc_request(rq)    ((rq)->cmd_type == REQ_TYPE_BLOCK_PC)
+#define blk_special_request(rq)       ((rq)->cmd_type == REQ_TYPE_SPECIAL)

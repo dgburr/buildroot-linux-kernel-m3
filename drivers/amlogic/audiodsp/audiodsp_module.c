@@ -173,8 +173,8 @@ static int audiodsp_open(struct inode *node, struct file *file)
 
 }
 
-static int audiodsp_ioctl(struct inode *node, struct file *file, unsigned int cmd,
-		      unsigned long args)
+static long audiodsp_ioctl(struct file *file, unsigned int cmd,
+                      unsigned long args)
 {
 	struct audiodsp_priv *priv=audiodsp_privdata();
 	struct audiodsp_cmd *a_cmd;
@@ -428,7 +428,9 @@ static int audiodsp_ioctl(struct inode *node, struct file *file, unsigned int cm
 			a_cmd=(struct audiodsp_cmd *)args;
 		//	DSP_PRNT("register firware,%d,%s\n",a_cmd->fmt,a_cmd->data);
 			len=a_cmd->data_len>64?64:a_cmd->data_len;
-			copy_from_user(name,a_cmd->data,len);
+			if (copy_from_user(name,a_cmd->data,len)) {
+				return -EFAULT;
+			}
 			name[len]='\0';
 			ret=audiodsp_microcode_register(priv,
 								a_cmd->fmt,
@@ -638,7 +640,8 @@ ssize_t audiodsp_read(struct file * file, char __user * ubuf, size_t size,
 	return len;
 error_out:
 	mutex_unlock(&priv->stream_buffer_mutex);
-	return 0;
+    printk("audiodsp_read failed\n");
+	return -EINVAL;
 }
 
 ssize_t audiodsp_write(struct file * file, const char __user * ubuf, size_t size,
@@ -665,7 +668,7 @@ const static struct file_operations audiodsp_fops = {
 	.read = audiodsp_read,
 	.write = audiodsp_write,
 	.release = audiodsp_release,
-	.ioctl = audiodsp_ioctl,
+	.unlocked_ioctl = audiodsp_ioctl,
 };
 static int audiodsp_get_status(struct adec_status *astatus)
 {
