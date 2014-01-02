@@ -2368,7 +2368,7 @@ struct uvc_driver uvc_driver = {
 static int __init uvc_init(void)
 {
 	int result;
-printk("%s amlogic\n", __func__);
+
 	result = usb_register(&uvc_driver.driver);
 	if (result == 0)
 		printk(KERN_INFO DRIVER_DESC " (" DRIVER_VERSION ")\n");

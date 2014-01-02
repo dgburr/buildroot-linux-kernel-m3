@@ -9,7 +9,6 @@
 #define _SCSI_SCSI_H
 
 #include <linux/types.h>
-#include <linux/scatterlist.h>
 
 struct scsi_cmnd;
 
@@ -31,6 +30,12 @@ struct scsi_cmnd;
 #else
 #define SCSI_MAX_SG_CHAIN_SEGMENTS	SCSI_MAX_SG_SEGMENTS
 #endif
+
+/*
+ * DIX-capable adapters effectively support infinite chaining for the
+ * protection information scatterlist
+ */
+#define SCSI_MAX_PROT_SG_SEGMENTS	0xFFFF
 
 /*
  * Special value for scanning to specify scanning or rescanning of all

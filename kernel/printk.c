@@ -89,7 +89,7 @@ EXPORT_SYMBOL(oops_in_progress);
  * provides serialisation for access to the entire console
  * driver system.
  */
-static DECLARE_MUTEX(console_sem);
+static DEFINE_SEMAPHORE(console_sem);
 struct console *console_drivers;
 EXPORT_SYMBOL_GPL(console_drivers);
 
@@ -214,7 +214,7 @@ __setup("log_buf_len=", log_buf_len_setup);
 
 #ifdef CONFIG_BOOT_PRINTK_DELAY
 
-static unsigned int boot_delay; /* msecs delay after each printk during bootup */
+static int boot_delay; /* msecs delay after each printk during bootup */
 static unsigned long long loops_per_msec;	/* based on boot_delay */
 
 static int __init boot_delay_setup(char *str)
@@ -265,68 +265,12 @@ static inline void boot_delay_msec(void)
 }
 #endif
 
-/*
- * Return the number of unread characters in the log buffer.
- */
-static int log_buf_get_len(void)
-{
-	return logged_chars;
-}
+#ifdef CONFIG_SECURITY_DMESG_RESTRICT
+int dmesg_restrict = 1;
+#else
+int dmesg_restrict;
+#endif
 
-/*
- * Clears the ring-buffer
- */
-void log_buf_clear(void)
-{
-	logged_chars = 0;
-}
-
-/*
- * Copy a range of characters from the log buffer.
- */
-int log_buf_copy(char *dest, int idx, int len)
-{
-	int ret, max;
-	bool took_lock = false;
-
-	if (!oops_in_progress) {
-		spin_lock_irq(&logbuf_lock);
-		took_lock = true;
-	}
-
-	max = log_buf_get_len();
-	if (idx < 0 || idx >= max) {
-		ret = -1;
-	} else {
-		if (len > max - idx)
-			len = max - idx;
-		ret = len;
-		idx += (log_end - max);
-		while (len-- > 0)
-			dest[len] = LOG_BUF(idx + len);
-	}
-
-	if (took_lock)
-		spin_unlock_irq(&logbuf_lock);
-
-	return ret;
-}
-
-/*
- * Commands to do_syslog:
- *
- * 	0 -- Close the log.  Currently a NOP.
- * 	1 -- Open the log. Currently a NOP.
- * 	2 -- Read from the log.
- * 	3 -- Read all messages remaining in the ring buffer.
- * 	4 -- Read and clear all messages remaining in the ring buffer
- * 	5 -- Clear ring buffer.
- * 	6 -- Disable printk's to console
- * 	7 -- Enable printk's to console
- *	8 -- Set level of messages printed to console
- *	9 -- Return number of unread characters in the log buffer
- *     10 -- Return size of the log buffer
- */
 int do_syslog(int type, char __user *buf, int len, bool from_file)
 {
 	unsigned i, j, limit, count;
@@ -334,7 +278,20 @@ int do_syslog(int type, char __user *buf, int len, bool from_file)
 	char c;
 	int error = 0;
 
-	error = security_syslog(type, from_file);
+	/*
+	 * If this is from /proc/kmsg we only do the capabilities checks
+	 * at open time.
+	 */
+	if (type == SYSLOG_ACTION_OPEN || !from_file) {
+		if (dmesg_restrict && !capable(CAP_SYS_ADMIN))
+			return -EPERM;
+		if ((type != SYSLOG_ACTION_READ_ALL &&
+		     type != SYSLOG_ACTION_SIZE_BUFFER) &&
+		    !capable(CAP_SYS_ADMIN))
+			return -EPERM;
+	}
+
+	error = security_syslog(type);
 	if (error)
 		return error;
 
@@ -622,7 +579,7 @@ static void zap_locks(void)
 	/* If a crash is occurring, make sure we can't deadlock */
 	spin_lock_init(&logbuf_lock);
 	/* And make sure that we print immediately */
-	init_MUTEX(&console_sem);
+	sema_init(&console_sem, 1);
 }
 
 #if defined(CONFIG_PRINTK_TIME)
@@ -665,6 +622,7 @@ static int have_callable_console(void)
  *
  * See the vsnprintf() documentation for format string extensions over C99.
  */
+
 asmlinkage int printk(const char *fmt, ...)
 {
 	va_list args;
@@ -712,6 +670,7 @@ static inline int can_use_console(unsigned int cpu)
  * released but interrupts still disabled.
  */
 static int acquire_console_semaphore_for_printk(unsigned int cpu)
+	__releases(&logbuf_lock)
 {
 	int retval = 0;
 
@@ -1592,7 +1551,7 @@ int kmsg_dump_unregister(struct kmsg_dumper *dumper)
 }
 EXPORT_SYMBOL_GPL(kmsg_dump_unregister);
 
-static const char const *kmsg_reasons[] = {
+static const char * const kmsg_reasons[] = {
 	[KMSG_DUMP_OOPS]	= "oops",
 	[KMSG_DUMP_PANIC]	= "panic",
 	[KMSG_DUMP_KEXEC]	= "kexec",

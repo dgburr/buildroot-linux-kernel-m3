@@ -299,7 +299,7 @@ static int usb_stor_control_thread(void * __us)
 		 * is UNKNOWN
 		 */
 		if (us->srb->sc_data_direction == DMA_BIDIRECTIONAL) {
-			US_DEBUGPE("UNKNOWN data direction\n");
+			US_DEBUGP("UNKNOWN data direction\n");
 			us->srb->result = DID_ERROR << 16;
 		}
 
@@ -327,7 +327,7 @@ static int usb_stor_control_thread(void * __us)
 			    0x00, 0x80, 0x02, 0x02,
 			    0x1F, 0x00, 0x00, 0x00};
 
-			US_DEBUGPE("Faking INQUIRY command\n");
+			US_DEBUGP("Faking INQUIRY command\n");
 			fill_inquiry_response(us, data_ptr, 36);
 			us->srb->result = SAM_STAT_GOOD;
 		}
@@ -349,7 +349,7 @@ static int usb_stor_control_thread(void * __us)
 			us->srb->scsi_done(us->srb);
 		} else {
 SkipForAbort:
-			US_DEBUGPE("scsi command aborted\n");
+			US_DEBUGP("scsi command aborted\n");
 		}
 
 		/* If an abort request was received we need to signal that
@@ -411,14 +411,14 @@ static int associate_dev(struct us_data *us, struct usb_interface *intf)
 	/* Allocate the control/setup and DMA-mapped buffers */
 	us->cr = kmalloc(sizeof(*us->cr), GFP_KERNEL);
 	if (!us->cr) {
-		US_DEBUGPE("usb_ctrlrequest allocation failed\n");
+		US_DEBUGP("usb_ctrlrequest allocation failed\n");
 		return -ENOMEM;
 	}
 
 	us->iobuf = usb_alloc_coherent(us->pusb_dev, US_IOBUF_SIZE,
 			GFP_KERNEL, &us->iobuf_dma);
 	if (!us->iobuf) {
-		US_DEBUGPE("I/O buffer allocation failed\n");
+		US_DEBUGP("I/O buffer allocation failed\n");
 		return -ENOMEM;
 	}
 	return 0;
@@ -512,10 +512,10 @@ static int get_device_info(struct us_data *us, const struct usb_device_id *id,
 
 	/* Store the entries */
 	us->unusual_dev = unusual_dev;
-	us->subclass = (unusual_dev->useProtocol == US_SC_DEVICE) ?
+	us->subclass = (unusual_dev->useProtocol == USB_SC_DEVICE) ?
 			idesc->bInterfaceSubClass :
 			unusual_dev->useProtocol;
-	us->protocol = (unusual_dev->useTransport == US_PR_DEVICE) ?
+	us->protocol = (unusual_dev->useTransport == USB_PR_DEVICE) ?
 			idesc->bInterfaceProtocol :
 			unusual_dev->useTransport;
 	us->fflags = USB_US_ORIG_FLAGS(id->driver_info);
@@ -552,10 +552,10 @@ static int get_device_info(struct us_data *us, const struct usb_device_id *id,
 		struct usb_device_descriptor *ddesc = &dev->descriptor;
 		int msg = -1;
 
-		if (unusual_dev->useProtocol != US_SC_DEVICE &&
+		if (unusual_dev->useProtocol != USB_SC_DEVICE &&
 			us->subclass == idesc->bInterfaceSubClass)
 			msg += 1;
-		if (unusual_dev->useTransport != US_PR_DEVICE &&
+		if (unusual_dev->useTransport != USB_PR_DEVICE &&
 			us->protocol == idesc->bInterfaceProtocol)
 			msg += 2;
 		if (msg >= 0 && !(us->fflags & US_FL_NEED_OVERRIDE))
@@ -582,21 +582,21 @@ static int get_device_info(struct us_data *us, const struct usb_device_id *id,
 static void get_transport(struct us_data *us)
 {
 	switch (us->protocol) {
-	case US_PR_CB:
+	case USB_PR_CB:
 		us->transport_name = "Control/Bulk";
 		us->transport = usb_stor_CB_transport;
 		us->transport_reset = usb_stor_CB_reset;
 		us->max_lun = 7;
 		break;
 
-	case US_PR_CBI:
+	case USB_PR_CBI:
 		us->transport_name = "Control/Bulk/Interrupt";
 		us->transport = usb_stor_CB_transport;
 		us->transport_reset = usb_stor_CB_reset;
 		us->max_lun = 7;
 		break;
 
-	case US_PR_BULK:
+	case USB_PR_BULK:
 		us->transport_name = "Bulk";
 		us->transport = usb_stor_Bulk_transport;
 		us->transport_reset = usb_stor_Bulk_reset;
@@ -608,35 +608,35 @@ static void get_transport(struct us_data *us)
 static void get_protocol(struct us_data *us)
 {
 	switch (us->subclass) {
-	case US_SC_RBC:
+	case USB_SC_RBC:
 		us->protocol_name = "Reduced Block Commands (RBC)";
 		us->proto_handler = usb_stor_transparent_scsi_command;
 		break;
 
-	case US_SC_8020:
+	case USB_SC_8020:
 		us->protocol_name = "8020i";
 		us->proto_handler = usb_stor_pad12_command;
 		us->max_lun = 0;
 		break;
 
-	case US_SC_QIC:
+	case USB_SC_QIC:
 		us->protocol_name = "QIC-157";
 		us->proto_handler = usb_stor_pad12_command;
 		us->max_lun = 0;
 		break;
 
-	case US_SC_8070:
+	case USB_SC_8070:
 		us->protocol_name = "8070i";
 		us->proto_handler = usb_stor_pad12_command;
 		us->max_lun = 0;
 		break;
 
-	case US_SC_SCSI:
+	case USB_SC_SCSI:
 		us->protocol_name = "Transparent SCSI";
 		us->proto_handler = usb_stor_transparent_scsi_command;
 		break;
 
-	case US_SC_UFI:
+	case USB_SC_UFI:
 		us->protocol_name = "Uniform Floppy Interface (UFI)";
 		us->proto_handler = usb_stor_ufi_command;
 		break;
@@ -679,8 +679,8 @@ static int get_pipes(struct us_data *us)
 		}
 	}
 
-	if (!ep_in || !ep_out || (us->protocol == US_PR_CBI && !ep_int)) {
-		US_DEBUGPE("Endpoint sanity check failed! Rejecting dev.\n");
+	if (!ep_in || !ep_out || (us->protocol == USB_PR_CBI && !ep_int)) {
+		US_DEBUGP("Endpoint sanity check failed! Rejecting dev.\n");
 		return -EIO;
 	}
 
@@ -707,7 +707,7 @@ static int usb_stor_acquire_resources(struct us_data *us)
 
 	us->current_urb = usb_alloc_urb(0, GFP_KERNEL);
 	if (!us->current_urb) {
-		US_DEBUGPE("URB allocation failed\n");
+		US_DEBUGP("URB allocation failed\n");
 		return -ENOMEM;
 	}
 
@@ -834,7 +834,7 @@ static int usb_stor_scan_thread(void * __us)
 	if (!test_bit(US_FLIDX_DONT_SCAN, &us->dflags)) {
 
 		/* For bulk-only devices, determine the max LUN value */
-		if (us->protocol == US_PR_BULK &&
+		if (us->protocol == USB_PR_BULK &&
 				!(us->fflags & US_FL_SINGLE_LUN)) {
 			mutex_lock(&us->dev_mutex);
 			us->max_lun = usb_stor_Bulk_max_lun(us);
@@ -916,7 +916,7 @@ int usb_stor_probe1(struct us_data **pus,
 	return 0;
 
 BadDevice:
-	US_DEBUGPE("storage_probe1() failed\n");
+	US_DEBUGP("storage_probe() failed\n");
 	release_everything(us);
 	return result;
 }
@@ -977,7 +977,7 @@ int usb_stor_probe2(struct us_data *us)
 
 	/* We come here if there are any problems */
 BadDevice:
-	US_DEBUGPE("storage_probe2() failed\n");
+	US_DEBUGP("storage_probe() failed\n");
 	release_everything(us);
 	return result;
 }
@@ -988,7 +988,7 @@ void usb_stor_disconnect(struct usb_interface *intf)
 {
 	struct us_data *us = usb_get_intfdata(intf);
 
-	US_DEBUGPE("storage_disconnect() called\n");
+	US_DEBUGP("storage_disconnect() called\n");
 	quiesce_and_remove_host(us);
 	release_everything(us);
 }

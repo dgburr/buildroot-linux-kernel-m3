@@ -190,7 +190,7 @@ static int gen_ndis_query_resp(int configNr, u32 OID, u8 *buf,
 	rndis_query_cmplt_type *resp;
 	struct net_device *net;
 	struct rtnl_link_stats64 temp;
-	struct rtnl_link_stats64 *stats = &temp;
+	const struct rtnl_link_stats64 *stats;
 
 	if (!r) return -ENOMEM;
 	resp = (rndis_query_cmplt_type *)r->buf;
@@ -311,10 +311,12 @@ static int gen_ndis_query_resp(int configNr, u32 OID, u8 *buf,
 	/* mandatory */
 	case OID_GEN_VENDOR_DESCRIPTION:
 		pr_debug("%s: OID_GEN_VENDOR_DESCRIPTION\n", __func__);
-		if ( rndis_per_dev_params [configNr].vendorDescr ) {
-			length = strlen (rndis_per_dev_params [configNr].vendorDescr);
-			memcpy (outbuf,
-				rndis_per_dev_params [configNr].vendorDescr, length);
+		if (rndis_per_dev_params[configNr].vendorDescr) {
+			length = strlen(rndis_per_dev_params[configNr].
+					vendorDescr);
+			memcpy(outbuf,
+				rndis_per_dev_params[configNr].vendorDescr,
+				length);
 		} else {
 			outbuf[0] = 0;
 		}
