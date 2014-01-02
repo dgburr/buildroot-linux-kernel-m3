@@ -2115,7 +2115,6 @@ DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_ATI, PCI_DEVICE_ID_ATI_RS480, quirk_disabl
 DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_VIA, PCI_DEVICE_ID_VIA_VT3336, quirk_disable_all_msi);
 DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_VIA, PCI_DEVICE_ID_VIA_VT3351, quirk_disable_all_msi);
 DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_VIA, PCI_DEVICE_ID_VIA_VT3364, quirk_disable_all_msi);
-DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_VIA, PCI_DEVICE_ID_VIA_8380_0, quirk_disable_all_msi);
 
 /* Disable MSI on chipsets that are known to not support it */
 static void __devinit quirk_disable_msi(struct pci_dev *dev)
@@ -2391,9 +2390,6 @@ static void __devinit __nv_msi_ht_cap_quirk(struct pci_dev *dev, int all)
 	int pos;
 	int found;
 
-	if (!pci_msi_enabled())
-		return;
-
 	/* check if there is HT MSI cap or enabled on this device */
 	found = ht_check_msi_mapping(dev);
 
@@ -2560,6 +2556,19 @@ DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_INTEL, 0x150d, quirk_i82576_sriov);
 DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_INTEL, 0x1518, quirk_i82576_sriov);
 
 #endif	/* CONFIG_PCI_IOV */
+
+/* Allow manual resource allocation for PCI hotplug bridges
+ * via pci=hpmemsize=nnM and pci=hpiosize=nnM parameters. For
+ * some PCI-PCI hotplug bridges, like PLX 6254 (former HINT HB6),
+ * kernel fails to allocate resources when hotplug device is 
+ * inserted and PCI bus is rescanned.
+ */
+static void __devinit quirk_hotplug_bridge(struct pci_dev *dev)
+{
+	dev->is_hotplug_bridge = 1;
+}
+
+DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_HINT, 0x0020, quirk_hotplug_bridge);
 
 /*
  * This is a quirk for the Ricoh MMC controller found as a part of

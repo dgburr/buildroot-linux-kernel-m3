@@ -25,8 +25,10 @@
 *.elf
 *.bin
 *.gz
+*.bz2
 *.gzip
 *.lzma
+*.lzo
 ccImage
 modules.builtin
 

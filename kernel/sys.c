@@ -518,10 +518,6 @@ SYSCALL_DEFINE2(setregid, gid_t, rgid, gid_t, egid)
 		return -ENOMEM;
 	old = current_cred();
 
-	retval = security_task_setgid(rgid, egid, (gid_t)-1, LSM_SETID_RE);
-	if (retval)
-		goto error;
-
 	retval = -EPERM;
 	if (rgid != (gid_t) -1) {
 		if (old->gid == rgid ||
@@ -568,10 +564,6 @@ SYSCALL_DEFINE1(setgid, gid_t, gid)
 	if (!new)
 		return -ENOMEM;
 	old = current_cred();
-
-	retval = security_task_setgid(gid, (gid_t)-1, (gid_t)-1, LSM_SETID_ID);
-	if (retval)
-		goto error;
 
 	retval = -EPERM;
 	if (capable(CAP_SETGID))
@@ -636,10 +628,6 @@ SYSCALL_DEFINE2(setreuid, uid_t, ruid, uid_t, euid)
 		return -ENOMEM;
 	old = current_cred();
 
-	retval = security_task_setuid(ruid, euid, (uid_t)-1, LSM_SETID_RE);
-	if (retval)
-		goto error;
-
 	retval = -EPERM;
 	if (ruid != (uid_t) -1) {
 		new->uid = ruid;
@@ -701,10 +689,6 @@ SYSCALL_DEFINE1(setuid, uid_t, uid)
 		return -ENOMEM;
 	old = current_cred();
 
-	retval = security_task_setuid(uid, (uid_t)-1, (uid_t)-1, LSM_SETID_ID);
-	if (retval)
-		goto error;
-
 	retval = -EPERM;
 	if (capable(CAP_SETUID)) {
 		new->suid = new->uid = uid;
@@ -745,9 +729,6 @@ SYSCALL_DEFINE3(setresuid, uid_t, ruid, uid_t, euid, uid_t, suid)
 	if (!new)
 		return -ENOMEM;
 
-	retval = security_task_setuid(ruid, euid, suid, LSM_SETID_RES);
-	if (retval)
-		goto error;
 	old = current_cred();
 
 	retval = -EPERM;
@@ -814,10 +795,6 @@ SYSCALL_DEFINE3(setresgid, gid_t, rgid, gid_t, egid, gid_t, sgid)
 		return -ENOMEM;
 	old = current_cred();
 
-	retval = security_task_setgid(rgid, egid, sgid, LSM_SETID_RES);
-	if (retval)
-		goto error;
-
 	retval = -EPERM;
 	if (!capable(CAP_SETGID)) {
 		if (rgid != (gid_t) -1 && rgid != old->gid &&
@@ -877,9 +854,6 @@ SYSCALL_DEFINE1(setfsuid, uid_t, uid)
 	old = current_cred();
 	old_fsuid = old->fsuid;
 
-	if (security_task_setuid(uid, (uid_t)-1, (uid_t)-1, LSM_SETID_FS) < 0)
-		goto error;
-
 	if (uid == old->uid  || uid == old->euid  ||
 	    uid == old->suid || uid == old->fsuid ||
 	    capable(CAP_SETUID)) {
@@ -890,7 +864,6 @@ SYSCALL_DEFINE1(setfsuid, uid_t, uid)
 		}
 	}
 
-error:
 	abort_creds(new);
 	return old_fsuid;
 
@@ -914,9 +887,6 @@ SYSCALL_DEFINE1(setfsgid, gid_t, gid)
 	old = current_cred();
 	old_fsgid = old->fsgid;
 
-	if (security_task_setgid(gid, (gid_t)-1, (gid_t)-1, LSM_SETID_FS))
-		goto error;
-
 	if (gid == old->gid  || gid == old->egid  ||
 	    gid == old->sgid || gid == old->fsgid ||
 	    capable(CAP_SETGID)) {
@@ -926,7 +896,6 @@ SYSCALL_DEFINE1(setfsgid, gid_t, gid)
 		}
 	}
 
-error:
 	abort_creds(new);
 	return old_fsgid;
 
@@ -1689,9 +1658,9 @@ SYSCALL_DEFINE3(getcpu, unsigned __user *, cpup, unsigned __user *, nodep,
 
 char poweroff_cmd[POWEROFF_CMD_PATH_LEN] = "/sbin/poweroff";
 
-static void argv_cleanup(char **argv, char **envp)
+static void argv_cleanup(struct subprocess_info *info)
 {
-	argv_free(argv);
+	argv_free(info->argv);
 }
 
 /**
@@ -1725,7 +1694,7 @@ int orderly_poweroff(bool force)
 		goto out;
 	}
 
-	call_usermodehelper_setcleanup(info, argv_cleanup);
+	call_usermodehelper_setfns(info, NULL, argv_cleanup, NULL);
 
 	ret = call_usermodehelper_exec(info, UMH_NO_WAIT);
 
