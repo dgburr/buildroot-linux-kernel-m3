@@ -1591,19 +1591,19 @@ static void set_multicast_list(struct net_device *dev)
 		}
 		dev_flags=dev->flags;
 	}
-	if (dev->mc_count > 0)
-	{
-		int cnt=dev->mc_count;
+	if (netdev_mc_count(dev) > 0) {
 		u32 hash[2];
-		struct dev_mc_list	*addr_list;
+		struct netdev_hw_addr *ha;
 		u32 hash_id;
-		char * addr;
-		hash[0]=0;
-		hash[1]=0;
-		//printk("changed the Multicast,mcount=%d\n",dev->mc_count);
-		for (addr_list = dev->mc_list; cnt && addr_list != NULL; addr_list = addr_list->next, cnt--) {
-			addr=addr_list->dmi_addr;
-			hash_id=phy_mc_hash(addr);
+		char *addr;
+		hash[0] = 0;
+		hash[1] = 0;
+		printk("changed the Multicast,mcount=%d\n",
+		       netdev_mc_count(dev));
+		//for (addr_list = dev->mc_list; cnt && addr_list != NULL; addr_list = addr_list->next, cnt--) {
+		netdev_for_each_mc_addr(ha, dev) {
+			addr = ha->addr;
+			hash_id = phy_mc_hash(addr);
 			///*
 			//printk("add mac address:%02x:%02x:%02x:%02x:%02x:%02x,bit=%d\n",
 			//	addr[0],addr[1],addr[2],addr[3],addr[4],addr[5],
