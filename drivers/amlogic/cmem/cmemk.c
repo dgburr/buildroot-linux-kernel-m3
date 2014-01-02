@@ -241,14 +241,14 @@ typedef struct registered_user {
 pool_object p_objs[NBLOCKS][MAX_POOLS];
 
 /* Forward declaration of system calls */
-static int ioctl(struct inode *inode, struct file *filp,
+static long ioctl(struct file *filp,
                  unsigned int cmd, unsigned long args);
 static int mmap(struct file *filp, struct vm_area_struct *vma);
 static int open(struct inode *inode, struct file *filp);
 static int release(struct inode *inode, struct file *filp);
 
 static struct file_operations cmem_fxns = {
-    ioctl:   ioctl,
+    unlocked_ioctl:   ioctl,
     mmap:    mmap,
     open:    open,
     release: release
@@ -1088,7 +1088,7 @@ struct block_struct {
     size_t size;
 };
 
-static int ioctl(struct inode *inode, struct file *filp,
+static long ioctl(struct file *filp,
                  unsigned int cmd, unsigned long args)
 {
     unsigned int __user *argp = (unsigned int __user *) args;
