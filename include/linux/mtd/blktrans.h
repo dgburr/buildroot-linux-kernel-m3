@@ -9,9 +9,6 @@
 #define __MTD_TRANS_H__
 
 #include <linux/mutex.h>
-#include <linux/kthread.h>
-#include <linux/spinlock.h>
-#include <linux/blkdev.h>
 #include <linux/kref.h>
 #include <linux/sysfs.h>
 
@@ -20,12 +17,6 @@ struct mtd_info;
 struct mtd_blktrans_ops;
 struct file;
 struct inode;
-
-struct mtd_blkcore_priv {
-	struct task_struct *thread;
-	struct request_queue *rq;
-	spinlock_t queue_lock;
-};
 
 struct mtd_blktrans_dev {
 	struct mtd_blktrans_ops *tr;

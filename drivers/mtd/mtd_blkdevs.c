@@ -60,13 +60,14 @@ void blktrans_dev_put(struct mtd_blktrans_dev *dev)
 	mutex_unlock(&blktrans_ref_mutex);
 }
 
+
 static int do_blktrans_request(struct mtd_blktrans_ops *tr,
 			       struct mtd_blktrans_dev *dev,
 			       struct request *req)
 {
 	unsigned long block, nsect;
 	char *buf;
- 
+
 	block = blk_rq_pos(req) << 9 >> tr->blkshift;
 	nsect = blk_rq_cur_bytes(req) >> tr->blkshift;
 
@@ -153,14 +154,13 @@ static void mtd_blktrans_request(struct request_queue *rq)
 	struct request *req = NULL;
 
 	dev = rq->queuedata;
- 
+
 	if (!dev)
 		while ((req = blk_fetch_request(rq)) != NULL)
 			__blk_end_request_all(req, -ENODEV);
 	else
 		wake_up_process(dev->thread);
 }
-
 
 static int blktrans_open(struct block_device *bdev, fmode_t mode)
 {
@@ -204,7 +204,7 @@ static int blktrans_release(struct gendisk *disk, fmode_t mode)
 
 	if (!dev->mtd)
 		goto unlock;
- 
+
 	ret = !--dev->open && dev->tr->release ? dev->tr->release(dev) : 0;
 unlock:
 	mutex_unlock(&dev->lock);
