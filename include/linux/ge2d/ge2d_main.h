@@ -63,7 +63,7 @@ typedef  struct {
 ***************************************************************/
 
 static int ge2d_open(struct inode *inode, struct file *file) ;
-static int ge2d_ioctl(struct inode *inode, struct file *filp, unsigned int cmd, unsigned long args) ;
+static long ge2d_ioctl(struct file *filp, unsigned int cmd, unsigned long args) ;
 static int ge2d_release(struct inode *inode, struct file *file);
 
 extern ssize_t work_queue_status_show(struct class *cla,struct class_attribute *attr,char *buf) ;
@@ -79,7 +79,7 @@ static DEFINE_MUTEX(ge2d_mutex);
 static const struct file_operations ge2d_fops = {
 	.owner		= THIS_MODULE,
 	.open		=ge2d_open,  
-	.ioctl		= ge2d_ioctl,
+	.unlocked_ioctl		= ge2d_ioctl,
 	.release		= ge2d_release, 	
 };
 static struct class_attribute ge2d_class_attrs[] = {

@@ -39,8 +39,8 @@ ge2d_open(struct inode *inode, struct file *file)
 	 ge2d_device.open_count++;
 	 return 0;
 }
-static int
-ge2d_ioctl(struct inode *inode, struct file *filp,
+static long
+ge2d_ioctl(struct file *filp,
                  unsigned int cmd, unsigned long args)
 {
 

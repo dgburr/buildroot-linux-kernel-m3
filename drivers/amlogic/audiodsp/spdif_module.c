@@ -78,7 +78,7 @@ static int audio_spdif_release(struct inode *inode, struct file *file)
 	IEC958_mode_codec = 0;
     return 0;
 }
-static int audio_spdif_ioctl(struct inode *inode, struct file *file, unsigned int cmd, unsigned long args)
+static long audio_spdif_ioctl(struct file *file, unsigned int cmd, unsigned long args)
 {
 	int err = 0;
 	unsigned long  *val = (unsigned long*)args;
@@ -199,7 +199,7 @@ static struct class_attribute audio_spdif_attrs[]={
 };
 static struct file_operations fops_spdif = {
     .read = audio_spdif_read,
-    .ioctl = audio_spdif_ioctl,
+    .unlocked_ioctl = audio_spdif_ioctl,
     .write = audio_spdif_write,
     .open = audio_spdif_open,
     .mmap = audio_spdif_mmap,

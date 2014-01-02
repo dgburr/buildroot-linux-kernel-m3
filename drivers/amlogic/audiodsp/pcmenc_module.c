@@ -29,7 +29,7 @@ static ssize_t audiodsp_pcmenc_read(struct file *, char *, size_t, loff_t *);
 static ssize_t audiodsp_pcmenc_write(struct file *, const char *, size_t, loff_t *);
 static int audiodsp_pcmenc_mmap(struct file *filp, struct vm_area_struct *vma);
 
-static int audiodsp_pcmenc_ioctl(struct inode *inode, struct file *file, unsigned int cmd, unsigned long args);
+static long audiodsp_pcmenc_ioctl(struct file *file, unsigned int cmd, unsigned long args);
 static int audiodsp_pcmenc_create_stream_buffer(void);
 static int audiodsp_pcmenc_destroy_stream_buffer(void);
 
@@ -97,7 +97,7 @@ static void remove_amaudio_attrs(struct class* class)
 }
 static struct file_operations fops = {
     .read = audiodsp_pcmenc_read,
-    .ioctl = audiodsp_pcmenc_ioctl,
+    .unlocked_ioctl = audiodsp_pcmenc_ioctl,
     .write = audiodsp_pcmenc_write,
     .open = audiodsp_pcmenc_open,
     .mmap = audiodsp_pcmenc_mmap,
@@ -241,7 +241,7 @@ static int audiodsp_pcmenc_mmap(struct file *filp, struct vm_area_struct *vma)
 
 	
 }
-static int audiodsp_pcmenc_ioctl(struct inode *inode, struct file *file, unsigned int cmd, unsigned long args)
+static long audiodsp_pcmenc_ioctl(struct file *file, unsigned int cmd, unsigned long args)
 {
 	int ret = 0;
 	unsigned long *val = (unsigned long *)args;

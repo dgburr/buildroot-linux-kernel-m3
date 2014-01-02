@@ -115,7 +115,7 @@ loff_t efuse_llseek(struct file *filp, loff_t off, int whence)
 		return newpos;
 }
 
-static int efuse_ioctl( struct inode *inode, struct file *file, unsigned int cmd, unsigned long arg )
+static long efuse_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
 	switch (cmd)
 	{
@@ -229,7 +229,7 @@ static const struct file_operations efuse_fops = {
 	.release    = efuse_release,
 	.read       = efuse_read,
 	.write      = efuse_write,
-	.ioctl      = efuse_ioctl,
+	.unlocked_ioctl      = efuse_ioctl,
 };
 
 /* Sysfs Files */

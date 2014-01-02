@@ -260,7 +260,7 @@ static int aml_wdt_release(struct inode *inode, struct file *file)
     return 0;
 }
 
-static int aml_wdt_ioctl(struct inode *inode, struct file *file,
+static long aml_wdt_ioctl(struct file *file,
     unsigned int cmd, unsigned long arg)
 {
     /* @todo */
@@ -271,7 +271,7 @@ static const struct file_operations aml_wdt_fops = {
     .owner          = THIS_MODULE,
     .open           = aml_wdt_open,
     .release        = aml_wdt_release,
-    .ioctl = aml_wdt_ioctl,
+    .unlocked_ioctl = aml_wdt_ioctl,
 };
 
 static struct miscdevice aml_wdt_miscdev = {

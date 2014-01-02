@@ -627,8 +627,8 @@ static int amaudio_open(struct inode *inode, struct file *file);
 
 static int amaudio_release(struct inode *inode, struct file *file);
 
-static int amaudio_ioctl(struct inode *inode, struct file *file,
-                        unsigned int cmd, ulong arg);
+static long amaudio_ioctl(struct file *file,
+                        unsigned int cmd, unsigned long arg);
 
 const static struct file_operations amaudio_out_fops = {
   .owner    =   THIS_MODULE,
@@ -636,7 +636,7 @@ const static struct file_operations amaudio_out_fops = {
   .release  =   amaudio_release,
   .write    =   amaudio_write,
   .read     =   amaudio_read,
-  .ioctl    =   amaudio_ioctl,
+  .unlocked_ioctl    =   amaudio_ioctl,
 };
 
 const static struct file_operations amaudio_in_fops = {
@@ -645,14 +645,14 @@ const static struct file_operations amaudio_in_fops = {
   .release  =   amaudio_release,
   .write    =   amaudio_write,
   .read     =   amaudio_read,
-  .ioctl    =   amaudio_ioctl,
+  .unlocked_ioctl    =   amaudio_ioctl,
 };
 
 const static struct file_operations amaudio_ctl_fops = {
   .owner    =   THIS_MODULE,
   .open     =   amaudio_open,
   .release  =   amaudio_release,
-  .ioctl    =   amaudio_ioctl,
+  .unlocked_ioctl    =   amaudio_ioctl,
 };
 
 static amaudio_port_t amaudio_ports[]={
@@ -1328,8 +1328,8 @@ static int amaudio_release(struct inode *inode, struct file *file)
 
 	return 0;
 }
-static int amaudio_ioctl(struct inode *inode, struct file *file,
-                        unsigned int cmd, ulong arg)
+static long amaudio_ioctl(struct file *file,
+                        unsigned int cmd, unsigned long arg)
 {
 	s32 r = 0;
 	u32 reg;
@@ -1467,7 +1467,7 @@ static int amaudio_ioctl(struct inode *inode, struct file *file,
 static const struct file_operations amaudio_fops = {
   .owner    =   THIS_MODULE,
   .open     =   amaudio_open,
-  .ioctl    =   amaudio_ioctl,
+  .unlocked_ioctl    =   amaudio_ioctl,
   .release  =   amaudio_release,
 };
 
@@ -1595,6 +1595,8 @@ static ssize_t show_enable_dump(struct class* class, struct class_attribute* att
 static ssize_t store_enable_dump(struct class* class, struct class_attribute* attr,
    const char* buf, size_t count )
 {
+  //unsigned long flags;
+  
   unsigned int tmp = 0;
 
   if(buf[0] == '0'){
@@ -1768,7 +1770,8 @@ static void create_amaudio_attrs(struct class* class)
 {
   int i=0;
   for(i=0; amaudio_attrs[i].attr.name; i++){
-    class_create_file(class, &amaudio_attrs[i]);
+    if(class_create_file(class, &amaudio_attrs[i]) < 0)
+      break;
   }
 }
 

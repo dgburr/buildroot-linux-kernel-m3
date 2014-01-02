@@ -19,7 +19,7 @@ static int audiodsplog_open(struct inode *, struct file *);
 static int audiodsplog_release(struct inode *, struct file *);
 static ssize_t audiodsplog_read(struct file *, char *, size_t, loff_t *);
 static ssize_t audiodsplog_write(struct file *, const char *, size_t, loff_t *);
-static int audiodsplog_ioctl(struct inode *inode, struct file *file, unsigned int cmd, unsigned long args);
+static long audiodsplog_ioctl(struct file *file, unsigned int cmd, unsigned long args);
 static int audiodsplog_create_stream_buffer(void);
 static int audiodsplog_destroy_stream_buffer(void);
 
@@ -54,7 +54,7 @@ static priv_data_t priv_data = {0};
 
 static struct file_operations fops = {
     .read = audiodsplog_read,
-    .ioctl = audiodsplog_ioctl,
+    .unlocked_ioctl = audiodsplog_ioctl,
     .write = audiodsplog_write,
     .open = audiodsplog_open,
     .release = audiodsplog_release
@@ -169,7 +169,7 @@ static ssize_t audiodsplog_write(struct file *filp, const char *buff, size_t len
     return -EINVAL;
 }
 
-static int audiodsplog_ioctl(struct inode *inode, struct file *file, unsigned int cmd, unsigned long args)
+static long audiodsplog_ioctl(struct file *file, unsigned int cmd, unsigned long args)
 {
     int ret = 0;
     unsigned long *val = (unsigned long *)args;

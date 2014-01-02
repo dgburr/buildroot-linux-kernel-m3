@@ -266,7 +266,7 @@ static int dvb_dsc_open(struct inode *inode, struct file *file)
 	return 0;
 }
 
-static int dvb_dsc_ioctl(struct inode *inode, struct file *file,
+static long dvb_dsc_ioctl(struct file *file,
                  unsigned int cmd, unsigned long arg)
 {
 	struct aml_dsc *dsc = file->private_data;
@@ -663,7 +663,7 @@ static struct file_operations dvb_dsc_fops = {
         .owner          = THIS_MODULE,
         .read           = NULL,
         .write          = NULL,
-        .ioctl          = dvb_dsc_ioctl,
+        .unlocked_ioctl          = dvb_dsc_ioctl,
         .open           = dvb_dsc_open,
         .release        = dvb_dsc_release,
         .poll           = NULL,

@@ -2096,8 +2096,8 @@ static int amvideo_release(struct inode *inode, struct file *file)
     return 0;
 }
 
-static int amvideo_ioctl(struct inode *inode, struct file *file,
-                         unsigned int cmd, ulong arg)
+static long amvideo_ioctl(struct file *file,
+                          unsigned int cmd, ulong arg)
 {
     int ret = 0;
     void *argp = (void *)arg;
@@ -2422,7 +2422,7 @@ const static struct file_operations amvideo_fops = {
     .owner    = THIS_MODULE,
     .open     = amvideo_open,
     .release  = amvideo_release,
-    .ioctl    = amvideo_ioctl,
+    .unlocked_ioctl    = amvideo_ioctl,
     .poll     = amvideo_poll,
 };
 

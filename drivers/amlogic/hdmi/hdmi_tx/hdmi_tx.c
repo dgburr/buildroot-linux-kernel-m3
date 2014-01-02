@@ -1264,7 +1264,7 @@ static int amhdmitx_release(struct inode *node, struct file *file)
 
 
 
-static int amhdmitx_ioctl(struct inode *node, struct file *file, unsigned int cmd,   unsigned long args)
+static long amhdmitx_ioctl(struct file *file, unsigned int cmd,   unsigned long args)
 {
     int   r = 0;
     switch (cmd) {
@@ -1278,7 +1278,7 @@ const static struct file_operations amhdmitx_fops = {
     .owner    = THIS_MODULE,
     .open     = amhdmitx_open,
     .release  = amhdmitx_release,
-    .ioctl    = amhdmitx_ioctl,
+    .unlocked_ioctl    = amhdmitx_ioctl,
 };
 
 

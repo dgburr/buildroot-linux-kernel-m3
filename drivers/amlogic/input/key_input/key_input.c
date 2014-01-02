@@ -152,7 +152,7 @@ key_input_release(struct inode *inode, struct file *file)
 static const struct file_operations key_input_fops = {
     .owner      = THIS_MODULE,
     .open       = key_input_open,
-    .ioctl      = NULL,
+    .unlocked_ioctl      = NULL,
     .release    = key_input_release,
 };
 

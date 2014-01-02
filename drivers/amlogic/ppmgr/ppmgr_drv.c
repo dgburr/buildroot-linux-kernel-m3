@@ -465,7 +465,7 @@ static int ppmgr_open(struct inode *inode, struct file *file)
     return 0;
 }
 
-static int ppmgr_ioctl(struct inode *inode, struct file *filp,
+static long ppmgr_ioctl(struct file *filp,
                  unsigned int cmd, unsigned long args)
 {
     void  __user* argp =(void __user*)args;
@@ -530,7 +530,7 @@ static int ppmgr_release(struct inode *inode, struct file *file)
 static const struct file_operations ppmgr_fops = {
     .owner   = THIS_MODULE,
     .open    = ppmgr_open,  
-    .ioctl   = ppmgr_ioctl,
+    .unlocked_ioctl   = ppmgr_ioctl,
     .release = ppmgr_release, 	
 };
 

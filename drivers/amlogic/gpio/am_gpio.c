@@ -257,7 +257,7 @@ static ssize_t am_gpio_write(struct file *file, const char __user *buf,
 
 
 }
-static int am_gpio_ioctl(struct inode *inode, struct file *file,
+static long am_gpio_ioctl(struct file *file,
                          unsigned int ctl_cmd, unsigned long arg)
 {
     cmd_t  *op = file->private_data;
@@ -296,7 +296,7 @@ static const struct file_operations am_gpio_fops = {
     .open   = am_gpio_open,
     .read   = am_gpio_read,
     .write  = am_gpio_write,
-    .ioctl      = am_gpio_ioctl,
+    .unlocked_ioctl      = am_gpio_ioctl,
     .release    = am_gpio_release,
     .poll       = NULL,
 };

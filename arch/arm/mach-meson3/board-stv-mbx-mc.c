@@ -2508,7 +2508,6 @@ static __init void m1_fixup(struct machine_desc *mach, struct tag *tag, char **c
     pbank=&m->bank[m->nr_banks];
     pbank->start = PAGE_ALIGN(PHYS_MEM_START);
     pbank->size  = SZ_64M & PAGE_MASK;
-    pbank->node  = PHYS_TO_NID(PHYS_MEM_START);
     m->nr_banks++;
     pbank=&m->bank[m->nr_banks];
     pbank->start = PAGE_ALIGN(RESERVED_MEM_END+1);
@@ -2517,7 +2516,6 @@ static __init void m1_fixup(struct machine_desc *mach, struct tag *tag, char **c
 #else
     pbank->size  = (PHYS_MEM_END-RESERVED_MEM_END) & PAGE_MASK;
 #endif
-    pbank->node  = PHYS_TO_NID(RESERVED_MEM_END+1);
     m->nr_banks++;
 }
 

@@ -662,8 +662,8 @@ remote_config_open(struct inode *inode, struct file *file)
 	file->private_data = gp_kp;
 	return 0;
 }
-	static int
-remote_config_ioctl(struct inode *inode, struct file *filp,
+	static long
+remote_config_ioctl(struct file *filp,
 		unsigned int cmd, unsigned long args)
 {
 	struct kp   *kp=(struct kp*)filp->private_data;
@@ -894,7 +894,7 @@ remote_config_release(struct inode *inode, struct file *file)
 static const struct file_operations remote_fops = {
 	.owner      = THIS_MODULE,
 	.open       =remote_config_open,
-	.ioctl      = remote_config_ioctl,
+	.unlocked_ioctl      = remote_config_ioctl,
 	.release        = remote_config_release,
 };
 

@@ -4217,7 +4217,7 @@ static int di_release(struct inode *node, struct file *file)
 
 
 
-static int di_ioctl(struct inode *node, struct file *file, unsigned int cmd,   unsigned long args)
+static long di_ioctl(struct file *file, unsigned int cmd, unsigned long args)
 {
     int   r = 0;
     switch (cmd) {
@@ -4231,7 +4231,7 @@ const static struct file_operations di_fops = {
     .owner    = THIS_MODULE,
     .open     = di_open,
     .release  = di_release,
-    .ioctl    = di_ioctl,
+    .unlocked_ioctl    = di_ioctl,
 };
 
 static int di_probe(struct platform_device *pdev)
