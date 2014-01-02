@@ -1295,6 +1295,7 @@ descriptor_error:
 	return -ENODEV;
 }
 
+/* No BKL needed */
 static int
 hub_ioctl(struct usb_interface *intf, unsigned int code, void *user_data)
 {
@@ -2859,16 +2860,13 @@ hub_port_init (struct usb_hub *hub, struct usb_device *udev, int port1,
 	else
 		i = udev->descriptor.bMaxPacketSize0;
 	if (le16_to_cpu(udev->ep0.desc.wMaxPacketSize) != i) {
-		if (udev->speed == USB_SPEED_LOW ||
+		if (udev->speed != USB_SPEED_FULL ||
 				!(i == 8 || i == 16 || i == 32 || i == 64)) {
-			dev_err(&udev->dev, "Invalid ep0 maxpacket: %d\n", i);
+			dev_err(&udev->dev, "ep0 maxpacket = %d\n", i);
 			retval = -EMSGSIZE;
 			goto fail;
 		}
-		if (udev->speed == USB_SPEED_FULL)
-			dev_dbg(&udev->dev, "ep0 maxpacket = %d\n", i);
-		else
-			dev_warn(&udev->dev, "Using ep0 maxpacket: %d\n", i);
+		dev_dbg(&udev->dev, "ep0 maxpacket = %d\n", i);
 		udev->ep0.desc.wMaxPacketSize = cpu_to_le16(i);
 		usb_ep0_reinit(udev);
 	}
@@ -2883,7 +2881,9 @@ hub_port_init (struct usb_hub *hub, struct usb_device *udev, int port1,
 	}
 
 	retval = 0;
-
+	/* notify HCD that we have a device connected and addressed */
+	if (hcd->driver->update_device)
+		hcd->driver->update_device(hcd, udev);
 fail:
 	if (retval) {
 		hub_port_disable(hub, port1, 0);
@@ -3470,7 +3470,7 @@ static struct usb_driver hub_driver = {
 	.reset_resume =	hub_reset_resume,
 	.pre_reset =	hub_pre_reset,
 	.post_reset =	hub_post_reset,
-	.ioctl =	hub_ioctl,
+	.unlocked_ioctl = hub_ioctl,
 	.id_table =	hub_id_table,
 	.supports_autosuspend =	1,
 };

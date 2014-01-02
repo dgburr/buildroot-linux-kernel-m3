@@ -422,6 +422,12 @@ void ahci_save_initial_config(struct device *dev,
 		cap &= ~HOST_CAP_SNTF;
 	}
 
+	if (!(cap & HOST_CAP_FBS) && (hpriv->flags & AHCI_HFLAG_YES_FBS)) {
+		dev_printk(KERN_INFO, dev,
+			   "controller can do FBS, turning on CAP_FBS\n");
+		cap |= HOST_CAP_FBS;
+	}
+
 	if (force_port_map && port_map != force_port_map) {
 		dev_printk(KERN_INFO, dev, "forcing port_map 0x%x -> 0x%x\n",
 			   port_map, force_port_map);
@@ -1824,24 +1830,12 @@ static unsigned int ahci_qc_issue(struct ata_queued_cmd *qc)
 static bool ahci_qc_fill_rtf(struct ata_queued_cmd *qc)
 {
 	struct ahci_port_priv *pp = qc->ap->private_data;
-	u8 *rx_fis = pp->rx_fis;
+	u8 *d2h_fis = pp->rx_fis + RX_FIS_D2H_REG;
 
 	if (pp->fbs_enabled)
-		rx_fis += qc->dev->link->pmp * AHCI_RX_FIS_SZ;
+		d2h_fis += qc->dev->link->pmp * AHCI_RX_FIS_SZ;
 
-	/*
-	 * After a successful execution of an ATA PIO data-in command,
-	 * the device doesn't send D2H Reg FIS to update the TF and
-	 * the host should take TF and E_Status from the preceding PIO
-	 * Setup FIS.
-	 */
-	if (qc->tf.protocol == ATA_PROT_PIO && qc->dma_dir == DMA_FROM_DEVICE &&
-	    !(qc->flags & ATA_QCFLAG_FAILED)) {
-		ata_tf_from_fis(rx_fis + RX_FIS_PIO_SETUP, &qc->result_tf);
-		qc->result_tf.command = (rx_fis + RX_FIS_PIO_SETUP)[15];
-	} else
-		ata_tf_from_fis(rx_fis + RX_FIS_D2H_REG, &qc->result_tf);
-
+	ata_tf_from_fis(d2h_fis, &qc->result_tf);
 	return true;
 }
 
@@ -2040,9 +2034,15 @@ static int ahci_port_start(struct ata_port *ap)
 		u32 cmd = readl(port_mmio + PORT_CMD);
 		if (cmd & PORT_CMD_FBSCP)
 			pp->fbs_supported = true;
-		else
+		else if (hpriv->flags & AHCI_HFLAG_YES_FBS) {
+			dev_printk(KERN_INFO, dev,
+				   "port %d can do FBS, forcing FBSCP\n",
+				   ap->port_no);
+			pp->fbs_supported = true;
+		} else
 			dev_printk(KERN_WARNING, dev,
-				   "The port is not capable of FBS\n");
+				   "port %d is not capable of FBS\n",
+				   ap->port_no);
 	}
 
 	if (pp->fbs_supported) {

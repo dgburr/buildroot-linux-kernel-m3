@@ -2964,6 +2964,13 @@ fsg_add(struct usb_composite_dev *cdev, struct usb_configuration *c,
 	return fsg_bind_config(cdev, c, common);
 }
 
+static inline int __deprecated __maybe_unused
+fsg_add(struct usb_composite_dev *cdev,
+	struct usb_configuration *c,
+	struct fsg_common *common)
+{
+	return fsg_bind_config(cdev, c, common);
+}
 
 /************************* Module parameters *************************/
 

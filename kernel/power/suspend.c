@@ -149,19 +149,19 @@ static int suspend_enter(suspend_state_t state)
 	if (suspend_ops->prepare) {
 		error = suspend_ops->prepare();
 		if (error)
-			return error;
+			goto Platform_finish;
 	}
 #ifdef DEVICE_SUPPORT_SUSPEND_NO_IRQ
 	error = dpm_suspend_noirq(PMSG_SUSPEND);
 	if (error) {
 		printk(KERN_ERR "PM: Some devices failed to power down\n");
-		goto Platfrom_finish;
+		goto Platform_finish;
 	}
 #endif
 	if (suspend_ops->prepare_late) {
 		error = suspend_ops->prepare_late();
 		if (error)
-			goto Power_up_devices;
+			goto Platform_wake;
 	}
 
 	if (suspend_test(TEST_PLATFORM))
@@ -176,8 +176,10 @@ static int suspend_enter(suspend_state_t state)
 
 	error = sysdev_suspend(PMSG_SUSPEND);
 	if (!error) {
-		if (!suspend_test(TEST_CORE))
+		if (!suspend_test(TEST_CORE) && pm_check_wakeup_events()) {
 			error = suspend_ops->enter(state);
+			events_check_enabled = false;
+		}
 		sysdev_resume();
 	}
 
@@ -200,11 +202,10 @@ static int suspend_enter(suspend_state_t state)
 	if (suspend_ops->wake)
 		suspend_ops->wake();
 
- Power_up_devices:
 #ifdef DEVICE_SUPPORT_SUSPEND_NO_IRQ
 	dpm_resume_noirq(PMSG_RESUME);
 #endif
- Platfrom_finish:
+ Platform_finish:
 	if (suspend_ops->finish)
 		suspend_ops->finish();
 

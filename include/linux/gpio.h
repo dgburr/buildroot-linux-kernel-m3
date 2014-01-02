@@ -14,6 +14,7 @@
 #include <linux/errno.h>
 
 struct device;
+struct gpio_chip;
 
 /*
  * Some platforms don't support the GPIO programming interface.
