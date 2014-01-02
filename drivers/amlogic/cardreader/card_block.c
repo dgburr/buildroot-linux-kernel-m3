@@ -957,7 +957,7 @@ void card_remove_inand_lp(struct card_host* host)
  * @part: partition table
  * @nr_part: partition numbers
  */
-int add_card_partition(struct memory_card* card, struct gendisk * disk,
+int add_card_partition(struct gendisk * disk,
                               struct mtd_partition * part, unsigned int nr_part)
 {
 	unsigned int i;
@@ -1020,7 +1020,7 @@ static int card_blk_probe(struct memory_card *card)
 	card_set_drvdata(card, card_data);
 
 	add_disk(card_data->disk);
-	add_card_partition(card, card_data->disk, pinfo->partitions,
+	add_card_partition(card_data->disk, pinfo->partitions,
 			pinfo->nr_partitions);
 
 	return 0;
