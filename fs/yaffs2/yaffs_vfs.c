@@ -2756,6 +2756,15 @@ static struct super_block *yaffs_internal_read_super(int yaffs_version,
 	param->n_caches = (options.no_cache) ? 0 : 10;
 	param->inband_tags = inband_tags;
 
+#if 1
+	//defined(CONFIG_AMLOGIC_BOARD)	
+	///add for amlogic nand as the kernel rootfs....
+	if (WRITE_SIZE(mtd) == 512)
+		param->inband_tags  = 0;
+	else
+		param->inband_tags  = 1;
+#endif
+
 	param->enable_xattr = 1;
 	if (options.lazy_loading_overridden)
 		param->disable_lazy_load = !options.lazy_loading_enabled;

@@ -142,6 +142,10 @@ static int yaffs_mtd_read(struct yaffs_dev *dev, int nand_chunk,
 			"read_oob failed, chunk %d, mtd error %d",
 			nand_chunk, retval);
 
+	//add by xiaojun.pi EUCLEAN is data corrected by ecc so needn`t return error
+	if (retval == -EUCLEAN)
+		retval = 0;
+
 	switch (retval) {
 	case 0:
 		/* no error */
