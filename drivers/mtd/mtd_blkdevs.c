@@ -252,8 +252,8 @@ static int blktrans_ioctl(struct block_device *bdev, fmode_t mode,
 		break;
 	case BLKGETSECTS:
 	case BLKFREESECTS:
-		if (tr->update_blktrans_sysinfo)
-			tr->update_blktrans_sysinfo(dev, cmd, arg);
+		if (dev->tr->update_blktrans_sysinfo)
+			dev->tr->update_blktrans_sysinfo(dev, cmd, arg);
 		ret = 0;
 		break;
 	default:
