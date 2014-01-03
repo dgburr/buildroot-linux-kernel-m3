@@ -18,9 +18,9 @@
 #include <linux/mtd/partitions.h>
 
 #include <mach/nand.h>
-#include <mach/clock.h>
-#include <mach/regops.h>
 
+extern int nand_get_device(struct nand_chip *chip, struct mtd_info *mtd,  int new_state);
+extern void nand_release_device(struct mtd_info *mtd);
 static char *aml_nand_plane_string[]={
 	"NAND_SINGLE_PLANE_MODE",
 	"NAND_TWO_PLANE_MODE",
@@ -125,7 +125,7 @@ static void m3_nand_hw_init(struct aml_nand_chip *aml_chip)
 	NFC_SET_CFG(0);
 	NFC_SET_TIMING_ASYC(bus_timing, (bus_cycle - 1));
 	NFC_SEND_CMD(1<<31);
-	printk("init bus_cycle=%d, bus_timing=%d, start_cycle=%d, end_cycle=%d,system=%d.%dns\n",
+	printk("bus_cycle=%d, bus_timing=%d, start_cycle=%d, end_cycle=%d,system=%d.%dns\n",
 		bus_cycle, bus_timing, start_cycle, end_cycle, sys_time/10, sys_time%10);
 	return;
 }
@@ -212,7 +212,7 @@ static void m3_nand_resume(struct mtd_info *mtd)
 		return;
 
 	chip->select_chip(mtd, 0);
-	chip->cmdfunc(mtd, NAND_CMD_RESET, -1, -1);	
+	chip->cmdfunc(mtd, NAND_CMD_RESET, -1, -1);
 
 	if (aml_chip->onfi_mode) {
 		aml_nand_set_onfi_features(aml_chip, (uint8_t *)(&aml_chip->onfi_mode), ONFI_TIMING_ADDR);
@@ -360,6 +360,7 @@ static int m3_nand_options_confirm(struct aml_nand_chip *aml_chip)
 		default:		
 			break;
 	}
+
 	options_selected = (plat->platform_nand_data.chip.options & NAND_PLANE_OPTIONS_MASK);
 	options_define = (aml_chip->options & NAND_PLANE_OPTIONS_MASK);
 	if (options_selected > options_define) {
@@ -377,6 +378,7 @@ static int m3_nand_options_confirm(struct aml_nand_chip *aml_chip)
 		valid_chip_num *= aml_chip->internal_chipnr;	
 	
 	if(valid_chip_num > 2){
+		aml_chip->plane_num = 1;
 	    printk("detect valid_chip_num:%d over 2, and aml_chip->internal_chipnr:%d, disable NAND_TWO_PLANE_MODE here\n", valid_chip_num, aml_chip->internal_chipnr);
 	}
 	else{
@@ -421,9 +423,9 @@ static int m3_nand_dma_write(struct aml_nand_chip *aml_chip, unsigned char *buf,
 	int ret = 0;
 	unsigned dma_unit_size = 0, count = 0;
 	struct nand_chip *chip = &aml_chip->chip;
+    struct mtd_info *mtd = &aml_chip->mtd;  
 
 	memcpy(aml_chip->aml_nand_data_buf, buf, len);
-    smp_wmb();
 	wmb();
 
 	if (bch_mode == NAND_ECC_NONE)
@@ -434,16 +436,14 @@ static int m3_nand_dma_write(struct aml_nand_chip *aml_chip, unsigned char *buf,
 	}
 	else
 		count = len/chip->ecc.size;
-#ifdef CONFIG_CLK81_DFS
-    down(&aml_chip->nand_sem);
-#endif
+
 	NFC_SEND_CMD_ADL(aml_chip->data_dma_addr);
 	NFC_SEND_CMD_ADH(aml_chip->data_dma_addr);
 	NFC_SEND_CMD_AIL(aml_chip->nand_info_dma_addr);
 	NFC_SEND_CMD_AIH((aml_chip->nand_info_dma_addr));
 	
 	if(aml_chip->ran_mode){
-		NFC_SEND_CMD_SEED(aml_chip->page_addr);
+	        NFC_SEND_CMD_SEED((aml_chip->page_addr/(mtd->writesize >> chip->page_shift)) * (mtd->writesize >> chip->page_shift));
 	}
 	if(!bch_mode)
 		NFC_SEND_CMD_M2N_RAW(aml_chip->ran_mode, len);
@@ -451,20 +451,19 @@ static int m3_nand_dma_write(struct aml_nand_chip *aml_chip, unsigned char *buf,
 		NFC_SEND_CMD_M2N(aml_chip->ran_mode, ((bch_mode == NAND_ECC_BCH_SHORT)?NAND_ECC_BCH60_1K:bch_mode), ((bch_mode == NAND_ECC_BCH_SHORT)?1:0), dma_unit_size, count);
 
 	ret = aml_platform_dma_waiting(aml_chip);
-#ifdef CONFIG_CLK81_DFS
-    up(&aml_chip->nand_sem);
-#endif	
+	
 	return ret;		 
 }
 
 static int m3_nand_dma_read(struct aml_nand_chip *aml_chip, unsigned char *buf, int len, unsigned bch_mode)
 {
-	volatile unsigned int * info_buf=NULL;
+	volatile unsigned int * info_buf=0;
 	//volatile int cmp=0;
 
 	struct nand_chip *chip = &aml_chip->chip;
 	unsigned dma_unit_size = 0, count = 0, info_times_int_len;
 	int ret = 0;
+    struct mtd_info *mtd = &aml_chip->mtd;  
 
 	info_times_int_len = PER_INFO_BYTE/sizeof(unsigned int);
 	if (bch_mode == NAND_ECC_NONE)
@@ -478,18 +477,14 @@ static int m3_nand_dma_read(struct aml_nand_chip *aml_chip, unsigned char *buf, 
 
 	info_buf = (volatile unsigned *)&(aml_chip->user_info_buf[(count-1)*info_times_int_len]);
 	memset((unsigned char *)aml_chip->user_info_buf, 0, count*PER_INFO_BYTE);
-	smp_wmb();
 	wmb();
 
-#ifdef CONFIG_CLK81_DFS
-    down(&aml_chip->nand_sem);
-#endif
 	NFC_SEND_CMD_ADL(aml_chip->data_dma_addr);
 	NFC_SEND_CMD_ADH(aml_chip->data_dma_addr);
 	NFC_SEND_CMD_AIL(aml_chip->nand_info_dma_addr);
 	NFC_SEND_CMD_AIH((aml_chip->nand_info_dma_addr));
 	if(aml_chip->ran_mode){
-		NFC_SEND_CMD_SEED(aml_chip->page_addr);
+	        NFC_SEND_CMD_SEED((aml_chip->page_addr/(mtd->writesize >> chip->page_shift)) * (mtd->writesize >> chip->page_shift));
 	}
 
 	if(bch_mode == NAND_ECC_NONE)
@@ -498,23 +493,17 @@ static int m3_nand_dma_read(struct aml_nand_chip *aml_chip, unsigned char *buf, 
 		NFC_SEND_CMD_N2M(aml_chip->ran_mode, ((bch_mode == NAND_ECC_BCH_SHORT)?NAND_ECC_BCH60_1K:bch_mode), ((bch_mode == NAND_ECC_BCH_SHORT)?1:0), dma_unit_size, count);
 
 	ret = aml_platform_dma_waiting(aml_chip);
-#ifdef CONFIG_CLK81_DFS
-    up(&aml_chip->nand_sem);
-#endif	
 	if (ret)
 		return ret;
 	/*do{
 		info_buf = (volatile unsigned *)&(aml_chip->user_info_buf[(count-1)*info_times_int_len]);	
 		cmp = *info_buf;	
 	}while((cmp)==0);*/
-	do{
-	    smp_rmb();
-	}while(NAND_INFO_DONE(aml_read_reg32((unsigned) info_buf)) == 0);
+	while(NAND_INFO_DONE(*info_buf) == 0);
+	rmb();
 
-	smp_rmb();
 	if (buf != aml_chip->aml_nand_data_buf)
 		memcpy(buf, aml_chip->aml_nand_data_buf, len);
-	smp_wmb();
 	wmb();
 
 	return 0;
@@ -523,7 +512,6 @@ static int m3_nand_dma_read(struct aml_nand_chip *aml_chip, unsigned char *buf, 
 static int m3_nand_hwecc_correct(struct aml_nand_chip *aml_chip, unsigned char *buf, unsigned size, unsigned char *oob_buf)
 {
 	struct nand_chip *chip = &aml_chip->chip;
-	struct mtd_info *mtd = &aml_chip->mtd;
 	unsigned ecc_step_num;
 	unsigned info_times_int_len = PER_INFO_BYTE/sizeof(unsigned int);
 		
@@ -535,7 +523,7 @@ static int m3_nand_hwecc_correct(struct aml_nand_chip *aml_chip, unsigned char *
 	aml_chip->ecc_cnt_cur = 0;
 	 for (ecc_step_num = 0; ecc_step_num < (size / chip->ecc.size); ecc_step_num++) {
 	 	//check if there have uncorrectable sector
-		if(NAND_ECC_CNT(aml_read_reg32((unsigned )(&aml_chip->user_info_buf[ecc_step_num*info_times_int_len]))) == 0x3f)
+		if(NAND_ECC_CNT(*(unsigned *)(&aml_chip->user_info_buf[ecc_step_num*info_times_int_len])) == 0x3f)
 		{
             		aml_chip->zero_cnt = NAND_ZERO_CNT(*(unsigned *)(&aml_chip->user_info_buf[ecc_step_num*info_times_int_len]));
 			//printk ("nand communication have uncorrectable ecc error %d\n", ecc_step_num);
@@ -637,7 +625,6 @@ static int m3_nand_boot_read_page_hwecc(struct mtd_info *mtd, struct nand_chip *
 			error = -EBUSY;
 			goto exit;
 		}
-		
 		if (aml_chip->ops_mode & AML_CHIP_NONE_RB) 
 			chip->cmd_ctrl(mtd, NAND_CMD_READ0 & 0xff, NAND_NCE | NAND_CLE | NAND_CTRL_CHANGE);
 
@@ -748,7 +735,7 @@ static int m3_nand_boot_write_page(struct mtd_info *mtd, struct nand_chip *chip,
 			memcpy(chip->buffers->databuf + sizeof(int), (unsigned char *)(&pages_per_blk), sizeof(int));
 			//add for new nand
 			memcpy(chip->buffers->databuf + sizeof(int) + sizeof(int), (unsigned char *)(&new_nand_type), sizeof(int));
-			
+
 			chip->cmdfunc(mtd, NAND_CMD_SEQIN, 0x00, write_page);
 			ran_mode = aml_chip->ran_mode;
 			aml_chip->ran_mode = 0;
@@ -810,48 +797,10 @@ static int m3_nand_boot_write_page(struct mtd_info *mtd, struct nand_chip *chip,
 	if(en_slc && (page > 3))
 		aml_chip->new_nand_info.slc_program_info.exit_enslc_mode(mtd);
 #endif
+		
 	return 0;
 }
-#ifdef CONFIG_CLK81_DFS
-static int nand_pre_change_fun(struct clk81_client* client)
-{
-    struct aml_nand_chip *aml_chip = client->param;
-    return 0;
-}
 
-
-static int nand_check_client_ready(struct clk81_client* client)
-{
-    struct aml_nand_chip *aml_chip = client->param;
-
-    if(aml_chip->lock_state){
-        printk(KERN_DEBUG "nand already lock");
-        return 0;
-    }
-    else{
-        if(down_trylock(&aml_chip->nand_sem)){
-            printk(KERN_DEBUG "nand lock not ready");
-            return -1;
-        }
-        aml_chip->lock_state = 1;
-        printk(KERN_DEBUG "nand lock ready");
-        return 0;
-    }
-}
-
-static int nand_post_change_fun(struct clk81_client* client)
-{
-    struct aml_nand_chip *aml_chip = client->param;
-
-    aml_chip->aml_nand_adjust_timing(aml_chip);
-    
-    up(&aml_chip->nand_sem);
-    aml_chip->lock_state = 0;
-    printk(KERN_DEBUG "nand unlock");
-    return 0;
-}
-#endif
-struct nand_hw_control controller;
 static int aml_nand_probe(struct aml_nand_platform *plat, struct device *dev)
 {
 	struct aml_nand_chip *aml_chip = NULL;
@@ -865,11 +814,7 @@ static int aml_nand_probe(struct aml_nand_platform *plat, struct device *dev)
 		err = -ENOMEM;
 		goto exit_error;
 	}
-#ifdef CONFIG_CLK81_DFS
-    init_MUTEX(&aml_chip->nand_sem);
-    aml_chip->lock_state = 0;
-    regist_clk81_client(plat->name, nand_pre_change_fun, nand_post_change_fun, nand_check_client_ready, aml_chip);
-#endif
+
 	/* initialize mtd info data struct */
 	dev->coherent_dma_mask = DMA_BIT_MASK(32);
 	aml_chip->device = dev;
@@ -878,15 +823,11 @@ static int aml_nand_probe(struct aml_nand_platform *plat, struct device *dev)
 	aml_chip->max_bch_mode = sizeof(m3_bch_list) / sizeof(m3_bch_list[0]);
 	plat->aml_chip = aml_chip;
 	chip = &aml_chip->chip;
-	chip->priv = aml_chip;//&aml_chip->mtd;
+	chip->priv = &aml_chip->mtd;
 	aml_chip->ran_mode = plat->ran_mode; 	
 	aml_chip->rbpin_detect = plat->rbpin_detect;	
-
-	chip->controller=&controller;
-	printk("chip->controller=%p\n",chip->controller);
 	mtd = &aml_chip->mtd;
 	mtd->priv = chip;
-    mtd->dev.parent= dev->parent;
 	mtd->owner = THIS_MODULE;
 
 	aml_chip->aml_nand_hw_init = m3_nand_hw_init;
@@ -896,9 +837,10 @@ static int aml_nand_probe(struct aml_nand_platform *plat, struct device *dev)
 	aml_chip->aml_nand_dma_read = m3_nand_dma_read;
 	aml_chip->aml_nand_dma_write = m3_nand_dma_write;
 	aml_chip->aml_nand_hwecc_correct = m3_nand_hwecc_correct;
-//    aml_chip->nand_early_suspend.suspend = m3_nand_early_suspend;
-//    aml_chip->nand_early_suspend.resume = m3_nand_late_resume;
-
+#ifdef CONFIG_HAS_EARLYSUSPEND
+    aml_chip->nand_early_suspend.suspend = m3_nand_early_suspend;
+    aml_chip->nand_early_suspend.resume = m3_nand_late_resume;
+#endif
 	err = aml_nand_init(aml_chip);
 	if (err)
 		goto exit_error;
@@ -931,12 +873,13 @@ exit_error:
 #define m3_nand_notifier_to_blk(l)	container_of(l, struct aml_nand_device, nb)
 static int m3_nand_reboot_notifier(struct notifier_block *nb, unsigned long priority, void * arg)
 {
-	int error = 0;	
+	int error = 0;
 	struct aml_nand_device *aml_nand_dev = m3_nand_notifier_to_blk(nb);
 	struct aml_nand_platform *plat = NULL;
 	struct aml_nand_chip *aml_chip = NULL;
 	struct mtd_info *mtd = NULL;
 	int i;
+	printk("%s %d \n", __func__, __LINE__);
 	for (i=1; i<aml_nand_dev->dev_num; i++) {
 		plat = &aml_nand_dev->aml_nand_platform[i];
 		aml_chip = plat->aml_chip;
@@ -955,8 +898,6 @@ static int m3_nand_reboot_notifier(struct notifier_block *nb, unsigned long prio
 
 	return error;
 }
-
-
 static int m3_nand_probe(struct platform_device *pdev)
 {
 	struct aml_nand_device *aml_nand_dev = to_nand_dev(pdev);
@@ -964,17 +905,15 @@ static int m3_nand_probe(struct platform_device *pdev)
 	int err = 0, i;
 
 	dev_dbg(&pdev->dev, "(%p)\n", pdev);
-	
+
 	if (!aml_nand_dev) {
 		dev_err(&pdev->dev, "no platform specific information\n");
 		err = -ENOMEM;
 		goto exit_error;
 	}
 	platform_set_drvdata(pdev, aml_nand_dev);
-	printk("%d\n",aml_nand_dev->dev_num);
-	spin_lock_init(&controller.lock);
-	init_waitqueue_head(&controller.wq);
 	aml_nand_dev->nb.notifier_call = m3_nand_reboot_notifier;
+
 	register_reboot_notifier(&aml_nand_dev->nb);
 	atomic_notifier_chain_register(&panic_notifier_list, &aml_nand_dev->nb);
 	for (i=0; i<aml_nand_dev->dev_num; i++) {
@@ -1008,7 +947,6 @@ static int m3_nand_remove(struct platform_device *pdev)
 		aml_chip = plat->aml_chip;
 		if (aml_chip) {
 			mtd = &aml_chip->mtd;
-		
 			if (mtd) {
 #ifdef NEW_NAND_SUPPORT				    
 				if((aml_chip->new_nand_info.type) && (aml_chip->new_nand_info.type < 10) && (i == 1)){
@@ -1033,6 +971,7 @@ static void m3_nand_shutdown(struct platform_device *pdev)
 	struct aml_nand_platform *plat = NULL;
 	struct aml_nand_chip *aml_chip = NULL;
 	struct mtd_info *mtd = NULL;
+	struct nand_chip *chip = NULL;
 	int i;
 
 	for (i=1; i<aml_nand_dev->dev_num; i++) {
@@ -1048,12 +987,21 @@ static void m3_nand_shutdown(struct platform_device *pdev)
 				}  
 			}
 #endif
+			if(mtd){
+				chip = mtd->priv;
+				if(chip){				
+					nand_get_device(chip, mtd, FL_SHUTDOWN);
+					chip->options |= NAND_ROM;					
+					printk("%s %d chip->options:%x\n", __func__, __LINE__, chip->options);
+					nand_release_device(mtd);
+				}
+			}
 		}
 	}
 
 	return;
 }
-#define DRV_NAME	"aml_nand"
+#define DRV_NAME	"aml_m3_nand"
 #define DRV_VERSION	"1.1"
 #define DRV_AUTHOR	"xiaojun_yoyo"
 #define DRV_DESC	"Amlogic nand flash AVOS driver for M3"

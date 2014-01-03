@@ -941,7 +941,7 @@ static void mmc_power_up(struct mmc_host *host)
 	 */
 	mmc_delay(10);
 
-	host->ios.clock = host->f_min;
+	host->ios.clock = host->f_init;
 
 	host->ios.power_mode = MMC_POWER_ON;
 	mmc_set_ios(host);
@@ -1471,6 +1471,8 @@ void mmc_rescan(struct work_struct *work)
 		container_of(work, struct mmc_host, detect.work);
 	u32 ocr;
 	int err;
+	int i;
+	const unsigned freqs[] = { 400000, 300000, 200000, 100000 };
 	int extend_wakelock = 0;
 
 	mmc_bus_get(host);
@@ -1799,8 +1801,6 @@ int mmc_pm_notify(struct notifier_block *notify_block,
 	struct mmc_host *host = container_of(
 		notify_block, struct mmc_host, pm_notify);
 	unsigned long flags;
-	int i;
-	const unsigned freqs[] = { 400000, 300000, 200000, 100000 };
 
 
 	switch (mode) {
