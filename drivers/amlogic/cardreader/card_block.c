@@ -520,7 +520,7 @@ int card_init_queue(struct card_queue *cq, struct memory_card *card,
 	}
 
 
-	init_MUTEX(&cq->thread_sem);
+	sema_init(&cq->thread_sem, 1);
 	cq->thread = kthread_run(card_queue_thread, cq, "%s_queue", card->name);
 	if (IS_ERR(cq->thread)) {
 		ret = PTR_ERR(cq->thread);
@@ -957,7 +957,7 @@ void card_remove_inand_lp(struct card_host* host)
  * @part: partition table
  * @nr_part: partition numbers
  */
-int add_card_partition(struct gendisk * disk,
+int add_card_partition(struct memory_card* card, struct gendisk * disk,
                               struct mtd_partition * part, unsigned int nr_part)
 {
 	unsigned int i;
@@ -983,7 +983,7 @@ int add_card_partition(struct gendisk * disk,
 			break;
 #endif
 		}
-		ret = add_partition(disk, 1+i, offset, size, 0);
+		ret = add_partition(disk, 1+i, offset, size, 0,NULL);//change by leo
 		printk("[%s%d] %20s  offset 0x%012llx, len 0x%012llx %s\n",
 				disk->disk_name, 1+i, part[i].name, offset<<9, size<<9,
 				IS_ERR(ret) ? "add fail":"");
@@ -1020,7 +1020,7 @@ static int card_blk_probe(struct memory_card *card)
 	card_set_drvdata(card, card_data);
 
 	add_disk(card_data->disk);
-	add_card_partition(card_data->disk, pinfo->partitions,
+	add_card_partition(card, card_data->disk, pinfo->partitions,
 			pinfo->nr_partitions);
 
 	return 0;

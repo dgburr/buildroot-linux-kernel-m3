@@ -20,7 +20,6 @@
 #include <mach/am_regs.h>
 #include "aml_audio_hw.h"
 
-struct snd_soc_codec_device soc_codec_dev_aml_m3;
 static struct snd_soc_codec *aml_m3_codec;
 
 extern int aml_m3_is_hp_pluged(void);
@@ -33,6 +32,8 @@ struct aml_m3_codec_priv {
 	u16 reg_cache[ADAC_MAXREG];
 	unsigned int sysclk;
 };
+
+u16 aml_m3_reg[ADAC_MAXREG] = {0};
 
 unsigned long aml_rate_table[] = {
     8000, 11025, 12000, 16000, 22050, 24000, 32000, 
@@ -533,7 +534,7 @@ static const struct soc_enum audio_in_source_enum =
 			audio_in_source_texts);
 
 
-static const struct snd_kcontrol_new amlm3_snd_controls[] = {
+static const struct snd_kcontrol_new aml_m3_snd_controls[] = {
 	SOC_DOUBLE_R_EXT_TLV("LINEOUT Playback Volume", ADAC_PLAYBACK_VOL_CTRL_LSB, ADAC_PLAYBACK_VOL_CTRL_MSB,
 	       0, 84, 0, snd_soc_get_volsw_2r, aml_put_volsw_2r, lineout_volume),
 	      
@@ -583,7 +584,7 @@ static const struct snd_kcontrol_new lineinl_switch_controls =
 static const struct snd_kcontrol_new lineinr_switch_controls =
 	SOC_DAPM_SINGLE("Switch", ADAC_MUTE_CTRL_REG2, 5, 1, 1);
 
-static const struct snd_soc_dapm_widget amlm3_dapm_widgets[] = {
+static const struct snd_soc_dapm_widget aml_m3_dapm_widgets[] = {
 	SND_SOC_DAPM_OUTPUT("LINEOUTL"),
 	SND_SOC_DAPM_OUTPUT("LINEOUTR"),
 	SND_SOC_DAPM_OUTPUT("HP_L"),
@@ -625,7 +626,7 @@ static const struct snd_soc_dapm_widget amlm3_dapm_widgets[] = {
 
 /* Target, Path, Source */
 
-static const struct snd_soc_dapm_route audio_map[] = {
+static const struct snd_soc_dapm_route aml_m3_audio_map[] = {
 	{"LINEOUTL", NULL, "LINEOUTL Switch"},
 	{"LINEOUTL Switch", NULL, "DACL"},
 	{"LINEOUTR", NULL, "LINEOUTR Switch"},
@@ -646,15 +647,6 @@ static const struct snd_soc_dapm_route audio_map[] = {
 	{"LINEINR Switch", NULL, "LINEINR"},
 };
 
-static int amlm3_add_widgets(struct snd_soc_codec *codec)
-{
-	snd_soc_dapm_new_controls(codec, amlm3_dapm_widgets,
-				  ARRAY_SIZE(amlm3_dapm_widgets));
-
-	snd_soc_dapm_add_routes(codec, audio_map, ARRAY_SIZE(audio_map));
-
-	return 0;
-}
 static int aml_m3_volatile_register(unsigned int reg)
 {
 	return 0;
@@ -665,7 +657,7 @@ static int aml_m3_write(struct snd_soc_codec *codec, unsigned int reg,
     u16 *reg_cache = codec->reg_cache;
 	
 	//printk("***Entered %s:%s:\nWriting reg is %#x; value=%#x\n",__FILE__,__func__, reg, value);
-	if (reg >= codec->reg_cache_size)
+	if (reg >= codec->driver->reg_cache_size)
 		return -EINVAL;
 	WRITE_APB_REG((APB_BASE+(reg<<2)), value);
 	reg_cache[reg] = value;
@@ -679,10 +671,10 @@ static unsigned int aml_m3_read(struct snd_soc_codec *codec,
 							unsigned int reg)
 {
 	//u16 *reg_cache = codec->reg_cache;
-	if (reg >= codec->reg_cache_size)
+	if (reg >= codec->driver->reg_cache_size)
 		return -EINVAL;
 	
-	if(codec->volatile_register(reg)){
+	if(codec->driver->volatile_register(reg)){
 		//return READ_APB_REG(APB_BASE+(reg<<2));
 	}
 	return READ_APB_REG(APB_BASE+(reg<<2));
@@ -693,7 +685,7 @@ static int aml_m3_codec_hw_params(struct snd_pcm_substream *substream,
 			    struct snd_pcm_hw_params *params,
 			    struct snd_soc_dai *dai)
 {
-    struct snd_soc_codec *codec = dai->codec;
+	struct snd_soc_codec *codec = dai->codec;
     unsigned int i2sfs;
     unsigned long rate = params_rate(params);
     int rate_idx = 0;
@@ -856,7 +848,7 @@ static struct snd_soc_dai_ops aml_m3_codec_dai_ops = {
 	.set_fmt	= aml_m3_codec_set_dai_fmt,
 };
 
-struct snd_soc_dai aml_m3_codec_dai = {
+struct snd_soc_dai_driver aml_m3_codec_dai = {
 	.name = "AML-M3",
 	.playback = {
 		.stream_name = "Playback",
@@ -894,180 +886,62 @@ static int aml_m3_set_bias_level(struct snd_soc_codec *codec,
 	return 0;
 }
 
-static int aml_m3_codec_probe(struct platform_device *pdev)
-{
-	struct snd_soc_device *socdev = platform_get_drvdata(pdev);
-	struct snd_soc_codec *codec;
-	struct aml_audio_platform *p;
-	int ret = 0;
-
-	if (!aml_m3_codec) {
-		dev_err(&pdev->dev, "AML_M3_CODEC not yet discovered\n");
-		return -ENODEV;
-	}
-
-	p = pdev->dev.platform_data;
-	socdev->dev->platform_data = p;
-	
-	codec = aml_m3_codec;			
-	socdev->card->codec = codec;	
-	
-	/* register pcms */
-	ret = snd_soc_new_pcms(socdev, SNDRV_DEFAULT_IDX1, SNDRV_DEFAULT_STR1);
-	if (ret < 0) {
-		kfree(codec);
-		dev_err(codec->dev, "aml m3 codec: failed to create pcms: %d\n", ret);
-		goto pcm_err;
-	}
-
-	snd_soc_add_controls(codec, amlm3_snd_controls,
-				ARRAY_SIZE(amlm3_snd_controls));
-	amlm3_add_widgets(codec);
-	
-pcm_err:
-
-	return ret;
-}
-
-
-static int aml_m3_codec_remove(struct platform_device *pdev)
-{
-	struct snd_soc_device *socdev = platform_get_drvdata(pdev);
-	snd_soc_free_pcms(socdev);
-	snd_soc_dapm_free(socdev);
-	return 0;
-}
-
-#ifdef CONFIG_PM
-static int aml_m3_codec_suspend(struct platform_device* pdev, pm_message_t state)
-{
-    struct snd_soc_device *socdev = platform_get_drvdata(pdev);
-    struct snd_soc_codec *codec = socdev->card->codec;
-
-    printk("aml_m3_codec_suspend\n");
-
-    WRITE_MPEG_REG( HHI_GCLK_MPEG1, READ_MPEG_REG(HHI_GCLK_MPEG1)&~(1 << 2));
-    aml_reset_path(codec, AML_PWR_DOWN);
-    return 0;
-}
-
-static int aml_m3_codec_resume(struct platform_device* pdev)
-{
-    struct snd_soc_device *socdev = platform_get_drvdata(pdev);
-    struct snd_soc_codec *codec = socdev->card->codec;
-
-    printk("aml_m3_codec resume\n");
-
-    WRITE_MPEG_REG( HHI_GCLK_MPEG1, READ_MPEG_REG(HHI_GCLK_MPEG1)|(1 << 2));
-    aml_m3_reset(codec, true);
-    return 0;
-}
-#endif
-
-struct snd_soc_codec_device soc_codec_dev_aml_m3 = {
-	.probe =	aml_m3_codec_probe,
-	.remove =	aml_m3_codec_remove,
-#ifdef CONFIG_PM	
-	.suspend = aml_m3_codec_suspend,
-	.resume = aml_m3_codec_resume,
-#else
-	.suspend = NULL,
-	.resume = NULL,
-#endif
-};
-EXPORT_SYMBOL_GPL(soc_codec_dev_aml_m3);
-
-static int aml_m3_register(struct aml_m3_codec_priv* aml_m3)
-{
-	struct snd_soc_codec* codec = &aml_m3->codec;
-	int ret;
-		
-	mutex_init(&codec->mutex);
-	INIT_LIST_HEAD(&codec->dapm_widgets);
-	INIT_LIST_HEAD(&codec->dapm_paths);
-
-	printk("***Entered %s:%s\n",__FILE__,__func__);
-
-	codec->name = "AML_M3_CODEC";
-	codec->owner = THIS_MODULE;
-
-	codec->dai = &aml_m3_codec_dai;
-	codec->num_dai = 1;
-
-	codec->reg_cache = &aml_m3->reg_cache;
-	codec->reg_cache_size = ARRAY_SIZE(aml_m3->reg_cache);
-	codec->read = aml_m3_read;
-	
-	codec->write = aml_m3_write;
-	codec->volatile_register = aml_m3_volatile_register;
-	
-	codec->bias_level = SND_SOC_BIAS_OFF;
-	codec->set_bias_level = aml_m3_set_bias_level;
-	aml_m3_codec_dai.dev = codec->dev;
-	
-	codec->dev->platform_data = aml_m3->codec.dev->platform_data;
+static int aml_m3_soc_probe(struct snd_soc_codec *codec){
 	aml_m3_reset(codec, true);
 	aml_m3_set_bias_level(codec, SND_SOC_BIAS_STANDBY);
+	
+	snd_soc_add_controls(codec, aml_m3_snd_controls,
+				ARRAY_SIZE(aml_m3_snd_controls));
 
-	aml_m3_codec = codec;
+	snd_soc_dapm_new_controls(codec, aml_m3_dapm_widgets,
+				  ARRAY_SIZE(aml_m3_dapm_widgets));
 
-	ret = snd_soc_register_codec(codec);
-	if (ret != 0) {
-		dev_err(codec->dev, "Failed to register codec: %d\n", ret);
-		goto err;
-	}
+	snd_soc_dapm_add_routes(codec, aml_m3_audio_map, ARRAY_SIZE(aml_m3_audio_map));
 
-	ret = snd_soc_register_dai(&aml_m3_codec_dai);
-	if (ret != 0) {
-		dev_err(codec->dev, "Failed to register DAI: %d\n", ret);
-		goto err_codec;
-	}
-
+    aml_m3_codec = codec;                
+    return 0;
+}
+static int aml_m3_soc_remove(struct snd_soc_codec *codec){
 	return 0;
-
-err_codec:
-	snd_soc_unregister_codec(codec);
-err:
-	aml_m3_codec = NULL;
-	kfree(aml_m3);
-	return ret;
-		
+}
+static int aml_m3_soc_suspend(struct snd_soc_codec *codec,	pm_message_t state){
+	printk("aml_m3_codec_suspend\n");
+	WRITE_MPEG_REG( HHI_GCLK_MPEG1, READ_MPEG_REG(HHI_GCLK_MPEG1)&~(1 << 2));
+    aml_reset_path(codec, AML_PWR_DOWN);	
+    return 0;
 }
 
-static void aml_m3_unregister(struct aml_m3_codec_priv *aml_m3)
-{
-	snd_soc_unregister_dai(&aml_m3_codec_dai);
-	snd_soc_unregister_codec(&aml_m3->codec);
-	aml_m3_codec = NULL;
-	kfree(aml_m3);
+static int aml_m3_soc_resume(struct snd_soc_codec *codec){
+	printk("aml_m3_codec resume\n");
+
+    WRITE_MPEG_REG( HHI_GCLK_MPEG1, READ_MPEG_REG(HHI_GCLK_MPEG1)|(1 << 2));
+    aml_m3_reset(codec, true);	
+    return 0;
 }
+
+static struct snd_soc_codec_driver soc_codec_dev_m3 = {
+	.probe = 	aml_m3_soc_probe,
+	.remove = 	aml_m3_soc_remove,
+	.suspend =	aml_m3_soc_suspend,
+	.resume = 	aml_m3_soc_resume,
+	.read = aml_m3_read,
+	.write = aml_m3_write,
+	.set_bias_level = aml_m3_set_bias_level,
+	.reg_cache_size = ARRAY_SIZE(aml_m3_reg),
+	.reg_word_size = sizeof(u16),
+	.reg_cache_step = 2,
+	.reg_cache_default = aml_m3_reg,
+};
 
 static int aml_m3_codec_platform_probe(struct platform_device *pdev)
 {
-	struct aml_m3_codec_priv *aml_m3;
-	struct snd_soc_codec *codec;
-
-	aml_m3 = kzalloc(sizeof(struct aml_m3_codec_priv), GFP_KERNEL);
-	if (aml_m3 == NULL)
-		return -ENOMEM;
-
-	codec = &aml_m3->codec;
-
-	codec->control_data = NULL;
-	codec->hw_write = NULL;
-	codec->pop_time = 0;
-
-	codec->dev = &pdev->dev;
-	aml_m3->codec.dev->platform_data = pdev->dev.platform_data;
-	platform_set_drvdata(pdev, aml_m3);
-	return aml_m3_register(aml_m3);
+	return snd_soc_register_codec(&pdev->dev, 
+		&soc_codec_dev_m3, &aml_m3_codec_dai, 1);
 }
 
 static int __exit aml_m3_codec_platform_remove(struct platform_device *pdev)
-{
-	struct aml_m3_codec_priv *aml_m3 = platform_get_drvdata(pdev);
-
-	aml_m3_unregister(aml_m3);
+{	
+	snd_soc_unregister_codec(&pdev->dev);
 	return 0;
 }
 

@@ -48,6 +48,6 @@ struct aml_pcm_dma_params{
 	
 };
 
-extern struct snd_soc_platform aml_soc_platform;
+extern struct snd_soc_platform_driver aml_soc_platform;
 
 #endif

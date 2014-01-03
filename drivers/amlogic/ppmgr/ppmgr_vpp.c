@@ -313,7 +313,7 @@ void vf_local_init(void)
         vfq_push(&q_free, &vfp_pool[i].frame);
     }
     
-    init_MUTEX(&thread_sem);
+    sema_init(&thread_sem, 1);
 }
 
 static const struct vframe_provider_s *dec_vfp = NULL;
@@ -1541,7 +1541,7 @@ int ppmgr_buffer_init(void)
     ppmgr_inited = true;
     ppmgr_reset_type = 0 ;
     set_buff_change(0);
-    init_MUTEX(&thread_sem);
+    sema_init(&thread_sem, 1);
     return 0;
 
 }

@@ -15,7 +15,7 @@
 
 
 //#include <asm/dsp/dsp_register.h>
-#include <linux/amports/dsp_register.h>
+#include "dsp_register.h"
 
 
 #include "dsp_mailbox.h"
@@ -25,10 +25,13 @@
 #define MIN_CACHE_ALIGN(x)	(((x-4)&(~0x1f)))
 #define MAX_CACHE_ALIGN(x)	((x+0x1f)&(~0x1f))
 
-extern unsigned IEC958_mode_raw;
-extern unsigned IEC958_mode_codec;
+#ifndef AUD_ARC_CTL
+#define AUD_ARC_CTL MEDIA_CPU_CTL
+#endif
 
-int decopt = 0x0000ffff;
+extern unsigned IEC958_mode_raw;
+
+static int decopt = 0x0000ffff;
 
 #define RESET_AUD_ARC	(1<<13)
 static void	enable_dsp(int flag)
@@ -37,9 +40,8 @@ static void	enable_dsp(int flag)
 	int xtal = 0;
 
 	/* RESET DSP */
-
 	 if(!flag)
-	  	 CLEAR_MPEG_REG_MASK(MEDIA_CPU_CTL, 1);
+	  	 CLEAR_MPEG_REG_MASK(AUD_ARC_CTL, 1);
 	/*write more for make the dsp is realy reset!*/
 	 SET_MPEG_REG_MASK(RESET2_REGISTER, RESET_AUD_ARC);
 	// M1 has this bug also????
@@ -52,8 +54,8 @@ static void	enable_dsp(int flag)
     	/* polling highest bit of IREG_DDR_CTRL until the mapping is done */
 	
         if (flag) {
-		    SET_MPEG_REG_MASK(MEDIA_CPU_CTL, 1);
-		    CLEAR_MPEG_REG_MASK(MEDIA_CPU_CTL, 1);
+		    SET_MPEG_REG_MASK(AUD_ARC_CTL, 1);
+		    CLEAR_MPEG_REG_MASK(AUD_ARC_CTL, 1);
 		    clk=clk_get_sys("a9_clk", NULL);
 		    if(!clk)
 			{
@@ -69,11 +71,14 @@ static void	enable_dsp(int flag)
 
 void halt_dsp( struct audiodsp_priv *priv)
 {
+#ifndef AUDIODSP_RESET
+    int i;
+#endif
+
 	if(DSP_RD(DSP_STATUS)==DSP_STATUS_RUNING)
 		{
 #ifndef AUDIODSP_RESET
-	  int i;
-	  dsp_mailbox_send(priv,1,M2B_IRQ0_DSP_SLEEP,0,0,0);
+		dsp_mailbox_send(priv,1,M2B_IRQ0_DSP_SLEEP,0,0,0);
         for(i = 0; i< 100;i++)
             {
                 if(DSP_RD(DSP_STATUS)== DSP_STATUS_SLEEP)
@@ -97,8 +102,8 @@ void halt_dsp( struct audiodsp_priv *priv)
     if(!priv->dsp_is_started){
 
 	    enable_dsp(0);/*hardware halt the cpu*/
-           DSP_WD(DSP_STATUS, DSP_STATUS_HALT);
-          priv->last_stream_fmt=-1;/*mask the stream format is not valid*/
+        DSP_WD(DSP_STATUS, DSP_STATUS_HALT);
+        priv->last_stream_fmt=-1;/*mask the stream format is not valid*/
     }   
     else
         DSP_WD(DSP_STATUS, DSP_STATUS_SLEEP);
@@ -107,24 +112,15 @@ void halt_dsp( struct audiodsp_priv *priv)
 void reset_dsp( struct audiodsp_priv *priv)
 {
     halt_dsp(priv);
+
     //flush_and_inv_dcache_all();
     /* map DSP 0 address so that reset vector points to same vector table as ARC1 */
-    CLEAR_MPEG_REG_MASK(MEDIA_CPU_CTL, (0xfff << 4));
+    CLEAR_MPEG_REG_MASK(AUD_ARC_CTL, (0xfff << 4));
  //   SET_MPEG_REG_MASK(SDRAM_CTL0,1);//arc mapping to ddr memory
-    SET_MPEG_REG_MASK(MEDIA_CPU_CTL, ((AUDIO_DSP_START_PHY_ADDR)>> 20) << 4);
+    SET_MPEG_REG_MASK(AUD_ARC_CTL, ((AUDIO_DSP_START_PHY_ADDR)>> 20) << 4);
 // decode option    
-    if(IEC958_mode_codec){
-      if(IEC958_mode_codec == 4){//dd+
-		DSP_WD(DSP_DECODE_OPTION, decopt|(3<<30));
-      }else{
-		DSP_WD(DSP_DECODE_OPTION, decopt|(1<<31));//dd,dts
-      }
-    }
-	else{
-		DSP_WD(DSP_DECODE_OPTION, decopt&(~(1<<31)));
-	}
-
-    printk("reset dsp : dec opt=%x\n", DSP_RD(DSP_DECODE_OPTION));
+    DSP_WD(DSP_DECODE_OPTION, decopt|(IEC958_mode_raw<<31));
+    printk("reset dsp : dec opt=%lx\n", DSP_RD(DSP_DECODE_OPTION));
     if(!priv->dsp_is_started){
         DSP_PRNT("dsp reset now\n");
         enable_dsp(1);
@@ -154,7 +150,7 @@ static inline int dsp_set_stack( struct audiodsp_priv *priv)
 
 	DSP_WD(DSP_STACK_START,MAX_CACHE_ALIGN(ARM_2_ARC_ADDR_SWAP(priv->dsp_stack_start)));
 	DSP_WD(DSP_STACK_END,MIN_CACHE_ALIGN(ARM_2_ARC_ADDR_SWAP(priv->dsp_stack_start)+priv->dsp_stack_size));
-	DSP_PRNT("DSP statck start =%#lx,size=%#lx\n",ARM_2_ARC_ADDR_SWAP(priv->dsp_stack_start),priv->dsp_stack_size);
+	DSP_PRNT("DSP statck start =%#lx,size=%#lx\n",(ulong)ARM_2_ARC_ADDR_SWAP(priv->dsp_stack_start),priv->dsp_stack_size);
 	if(priv->dsp_gstack_start==0)
 		priv->dsp_gstack_start=(unsigned long)kmalloc(priv->dsp_gstack_size,GFP_KERNEL);
 	if(priv->dsp_gstack_start==0)
@@ -168,7 +164,7 @@ static inline int dsp_set_stack( struct audiodsp_priv *priv)
 	 dma_unmap_single(NULL, buf_map,  priv->dsp_gstack_size, DMA_FROM_DEVICE);
 	DSP_WD(DSP_GP_STACK_START,MAX_CACHE_ALIGN(ARM_2_ARC_ADDR_SWAP(priv->dsp_gstack_start)));
 	DSP_WD(DSP_GP_STACK_END,MIN_CACHE_ALIGN(ARM_2_ARC_ADDR_SWAP(priv->dsp_gstack_start)+priv->dsp_gstack_size));
-	DSP_PRNT("DSP gp statck start =%#lx,size=%#lx\n",ARM_2_ARC_ADDR_SWAP(priv->dsp_gstack_start),priv->dsp_gstack_size);
+	DSP_PRNT("DSP gp statck start =%#lx,size=%#lx\n",(ulong)ARM_2_ARC_ADDR_SWAP(priv->dsp_gstack_start),priv->dsp_gstack_size);
 		
 	return 0;
 }
@@ -189,7 +185,7 @@ static inline int dsp_set_heap( struct audiodsp_priv *priv)
 	dma_unmap_single(NULL, buf_map,  priv->dsp_heap_size, DMA_FROM_DEVICE);
 	DSP_WD(DSP_MEM_START,MAX_CACHE_ALIGN(ARM_2_ARC_ADDR_SWAP(priv->dsp_heap_start)));
 	DSP_WD(DSP_MEM_END,MIN_CACHE_ALIGN(ARM_2_ARC_ADDR_SWAP(priv->dsp_heap_start)+priv->dsp_heap_size));
-	DSP_PRNT("DSP heap start =%#lx,size=%#lx\n",ARM_2_ARC_ADDR_SWAP(priv->dsp_heap_start),priv->dsp_heap_size);
+	DSP_PRNT("DSP heap start =%#lx,size=%#lx\n",(ulong)ARM_2_ARC_ADDR_SWAP(priv->dsp_heap_start),priv->dsp_heap_size);
 	return 0;
 }
 
@@ -233,7 +229,7 @@ static inline int dsp_set_stream_buffer( struct audiodsp_priv *priv)
 	DSP_WD(DSP_DECODE_OUT_RD_ADDR,ARM_2_ARC_ADDR_SWAP(priv->stream_buffer_start));
 	DSP_WD(DSP_DECODE_OUT_WD_ADDR,ARM_2_ARC_ADDR_SWAP(priv->stream_buffer_start));
 	
-	DSP_PRNT("DSP stream buffer to [%#lx-%#lx]\n",ARM_2_ARC_ADDR_SWAP(priv->stream_buffer_start),ARM_2_ARC_ADDR_SWAP(priv->stream_buffer_end));
+	DSP_PRNT("DSP stream buffer to [%#lx-%#lx]\n",(ulong)ARM_2_ARC_ADDR_SWAP(priv->stream_buffer_start),(ulong)ARM_2_ARC_ADDR_SWAP(priv->stream_buffer_end));
 	return 0;
 }
 
@@ -317,23 +313,6 @@ exit:
 	mutex_unlock(&priv->dsp_mutex);	
 	return 0;
  	}
-
-
-/**
- *	bit31 - digital raw output
- *	bit30 - IEC61937 pass over HDMI
- *    bit 5 - DTS passthrough working mode
- 		     00:  AIU 958 hw search raw mode 
- 		     01:  PCM_RAW mode,the same as AC3/AC3+
- *    bit 3:4 - used for the communication of dsp and player tansfer decoding infomation:
- *                00: used for libplayer_end to tell dsp_end that the file end has been notreached;
- *                01: used for libplayer_end to tell dsp_end that the file end has been reached;
- *                10: used for dsp_end to tell libplayer_end that all the data in the dsp_end_buf has been decoded completely;
- *                11: reserved;
- *	bit 2 - ARC DSP print flag
- *	bit 1  - dts decoder policy select: 0:mute 1:noise
- *	bit 0  - dd/dd+ 	decoder policy select  0:mute 1:noise
- * */
 
 static  int __init decode_option_setup(char *s)
 {

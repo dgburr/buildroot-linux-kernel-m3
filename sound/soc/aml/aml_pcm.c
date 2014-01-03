@@ -18,70 +18,52 @@
 #include <sound/control.h>
 #include <sound/soc.h>
 #include <sound/pcm_params.h>
-#include <sound/aml_platform.h>
 
 #include <mach/am_regs.h>
 #include <mach/pinmux.h>
 
 #include <linux/amports/amaudio.h>
+#include <mach/reg_addr.h>
+#include <mach/regops.h>
 
 #include "aml_pcm.h"
 #include "aml_audio_hw.h"
 
-//#define _AML_PCM_DEBUG_
-
-#define AOUT_EVENT_IEC_60958_PCM                0x1
-#define AOUT_EVENT_RAWDATA_AC_3                 0x2
-#define AOUT_EVENT_RAWDATA_MPEG1                0x3
-#define AOUT_EVENT_RAWDATA_MP3                  0x4
-#define AOUT_EVENT_RAWDATA_MPEG2                0x5
-#define AOUT_EVENT_RAWDATA_AAC                  0x6
-#define AOUT_EVENT_RAWDATA_DTS                  0x7
-#define AOUT_EVENT_RAWDATA_ATRAC                0x8
-#define AOUT_EVENT_RAWDATA_ONE_BIT_AUDIO        0x9
-#define AOUT_EVENT_RAWDATA_DOBLY_DIGITAL_PLUS   0xA
-#define AOUT_EVENT_RAWDATA_DTS_HD               0xB
-#define AOUT_EVENT_RAWDATA_MAT_MLP              0xC
-#define AOUT_EVENT_RAWDATA_DST                  0xD
-#define AOUT_EVENT_RAWDATA_WMA_PRO              0xE
-
+#define AOUT_EVENT_PREPARE  0x1
 extern int aout_notifier_call_chain(unsigned long val, void *v);
-extern void	aml_alsa_hw_reprepare();
 
-extern unsigned IEC958_mode_raw;
-extern unsigned IEC958_mode_codec;
-
-extern int aml_m3_is_hp_pluged(void);
-extern void mute_spk(struct snd_soc_codec* codec, int flag);
 unsigned int aml_pcm_playback_start_addr = 0;
 unsigned int aml_pcm_capture_start_addr  = 0;
-unsigned int aml_pcm_playback_end_addr = 0;
-unsigned int aml_pcm_capture_end_addr = 0;
-
-unsigned int aml_pcm_playback_phy_start_addr = 0;
-unsigned int aml_pcm_capture_phy_start_addr  = 0;
-unsigned int aml_pcm_playback_phy_end_addr = 0;
-unsigned int aml_pcm_capture_phy_end_addr = 0;
+unsigned int aml_pcm_capture_start_phy = 0;
+unsigned int aml_pcm_capture_buf_size = 0;
 unsigned int aml_pcm_playback_off = 0;
 unsigned int aml_pcm_playback_enable = 1;
-
-unsigned int aml_iec958_playback_start_addr = 0;
-unsigned int aml_iec958_playback_start_phy = 0;
-unsigned int aml_iec958_playback_size = 0;  // in bytes
-
-static  unsigned  playback_substream_handle = 0 ;
 /*to keep the pcm status for clockgating*/
 static unsigned clock_gating_status = 0;
 static unsigned clock_gating_playback = 1;
 static unsigned clock_gating_capture = 2;
-static int audio_type_info = -1;
-static int audio_sr_info = -1;
+static struct rt5631_platform_data *rt5631_snd_pdata = NULL;
+static struct aml_pcm_work_t{ 
+	struct snd_pcm_substream *substream;
+	struct work_struct aml_codec_workqueue;
+}aml_pcm_work;
+static int codec_power_switch(struct snd_pcm_substream *substream, unsigned int status);
 
 EXPORT_SYMBOL(aml_pcm_playback_start_addr);
 EXPORT_SYMBOL(aml_pcm_capture_start_addr);
 EXPORT_SYMBOL(aml_pcm_playback_off);
 EXPORT_SYMBOL(aml_pcm_playback_enable);
 
+static void aml_codec_power_switch_queue(struct work_struct* work)
+{
+
+	struct aml_pcm_work_t* pwork = container_of(work, struct aml_pcm_work_t, aml_codec_workqueue);
+    struct snd_pcm_substream* substream = pwork->substream;
+#ifdef _AML_PCM_DEBUG_
+	printk("***Entered %s:%s\n", __FILE__,__func__);
+#endif	
+	codec_power_switch(substream, clock_gating_status);
+}
 
 /*--------------------------------------------------------------------------*\
  * Hardware definition
@@ -92,7 +74,7 @@ EXPORT_SYMBOL(aml_pcm_playback_enable);
 static const struct snd_pcm_hardware aml_pcm_hardware = {
 	.info			= SNDRV_PCM_INFO_INTERLEAVED|
 							SNDRV_PCM_INFO_BLOCK_TRANSFER|
-				  		    SNDRV_PCM_INFO_PAUSE,
+							SNDRV_PCM_INFO_PAUSE,
 				  		
 	.formats		= SNDRV_PCM_FMTBIT_S16_LE|SNDRV_PCM_FMTBIT_S24_LE|SNDRV_PCM_FMTBIT_S32_LE,
 
@@ -100,21 +82,21 @@ static const struct snd_pcm_hardware aml_pcm_hardware = {
 	.period_bytes_max	= 8*1024,
 	.periods_min		= 2,
 	.periods_max		= 1024,
-	.buffer_bytes_max	= 64 * 1024,
+	.buffer_bytes_max	= 128 * 1024,
 	
-	.rate_min = 32000,
-    .rate_max = 48000,
-    .channels_min = 2,
-    .channels_max = 2,
-    .fifo_size = 0,
+	.rate_min = 8000,
+	.rate_max = 48000,
+	.channels_min = 2,
+	.channels_max = 2,
+	.fifo_size = 0,  
 };
 
 static const struct snd_pcm_hardware aml_pcm_capture = {
 	.info			= SNDRV_PCM_INFO_INTERLEAVED|
 							SNDRV_PCM_INFO_BLOCK_TRANSFER|
 							SNDRV_PCM_INFO_MMAP |
-				  		SNDRV_PCM_INFO_MMAP_VALID |
-				  		SNDRV_PCM_INFO_PAUSE,
+							SNDRV_PCM_INFO_MMAP_VALID |
+							SNDRV_PCM_INFO_PAUSE,
 				  		
 	.formats		= SNDRV_PCM_FMTBIT_S16_LE,
 	.period_bytes_min	= 64,
@@ -124,10 +106,10 @@ static const struct snd_pcm_hardware aml_pcm_capture = {
 	.buffer_bytes_max	= 64 * 1024,
 
 	.rate_min = 8000,
-    .rate_max = 48000,
-    .channels_min = 2,
-    .channels_max = 2,
-    .fifo_size = 0,
+	.rate_max = 48000,
+	.channels_min = 2,
+	.channels_max = 2,
+	.fifo_size = 0,  
 };
 
 static char snd_pcm_tmp[32*1024];
@@ -144,52 +126,58 @@ struct aml_runtime_data {
 	struct timer_list timer;	// timeer for playback and capture
 };
 
+static unsigned int period_sizes[] = { 64, 128, 256, 512, 1024, 2048, 4096, 8192 };
+
+static struct snd_pcm_hw_constraint_list hw_constraints_period_sizes = {
+	.count = ARRAY_SIZE(period_sizes),
+	.list = period_sizes,
+	.mask = 0
+};
+
 /*--------------------------------------------------------------------------*\
  * audio clock gating
 \*--------------------------------------------------------------------------*/
-#if defined(CONFIG_SND_AML_M3)
 static void aml_audio_clock_gating_disable(void)
 {
-	return;
-	struct snd_soc_codec* codec;
-	//printk("***Entered %s:%s\n", __FILE__,__func__);
-	//WRITE_CBUS_REG(HHI_GCLK_MPEG0, READ_CBUS_REG(HHI_GCLK_MPEG0)&~(1<<18));
-	WRITE_CBUS_REG(HHI_GCLK_MPEG1, READ_CBUS_REG(HHI_GCLK_MPEG1)&~(1<<2)
-								    //&~(0xFF<<6)
-								    );
-	//WRITE_CBUS_REG(HHI_GCLK_MPEG2, READ_CBUS_REG(HHI_GCLK_MPEG2)&~(1<<10));
-	//WRITE_CBUS_REG(HHI_GCLK_OTHER, READ_CBUS_REG(HHI_GCLK_OTHER)&~(1<<10)
-								    //&~(1<<18)
-								    //&~(0x7<<14));
-	mute_spk(codec,1);							    
-	WRITE_APB_REG(APB_ADAC_POWER_CTRL_REG2, READ_APB_REG(APB_ADAC_POWER_CTRL_REG2)&(~(1<<7)));
-	adac_latch();
-	
+#ifdef _AML_PCM_DEBUG_
+			printk("***Entered %s:%s\n", __FILE__,__func__);
+#endif
+/*
+	aml_clr_reg32_mask(P_HHI_GCLK_MPEG0, (1<<18));
+	aml_clr_reg32_mask(P_HHI_GCLK_MPEG1, (1<<2)
+										|(0xba<<6)
+								    	);
+	aml_clr_reg32_mask(P_HHI_GCLK_OTHER, (1<<18)
+										|(0x6<<14)
+								    	);
+ */   aml_clr_reg32_mask( P_HHI_AUD_CLK_CNTL, (1 << 8));
+
+	//printk("P_HHI_GCLK_MPEG0=disable--%#x\n\n", aml_read_reg32(P_HHI_GCLK_MPEG0));
+	//printk("P_HHI_GCLK_MPEG1=disable--%#x\n\n", aml_read_reg32(P_HHI_GCLK_MPEG1));
+	//printk("P_HHI_GCLK_OTHER=disable--%#x\n\n", aml_read_reg32(P_HHI_GCLK_OTHER));
 }
 
 static void aml_audio_clock_gating_enable(void)
 {
-	struct snd_soc_codec* codec;
-	printk("***Entered %s:%s\n", __FILE__,__func__);
-	//WRITE_CBUS_REG(HHI_GCLK_MPEG0, READ_CBUS_REG(HHI_GCLK_MPEG0)|(1<<18));
-	WRITE_CBUS_REG(HHI_GCLK_MPEG1, READ_CBUS_REG(HHI_GCLK_MPEG1)|(1<<2)
-								    //|(0xFF<<6)
-								    );
-	//WRITE_CBUS_REG(HHI_GCLK_MPEG2, READ_CBUS_REG(HHI_GCLK_MPEG2)|(1<<10));
-	//WRITE_CBUS_REG(HHI_GCLK_OTHER, READ_CBUS_REG(HHI_GCLK_OTHER)|(1<<10)
-								    //|(1<<18)
-								    //|(0x7<<14));
-	WRITE_APB_REG(APB_ADAC_POWER_CTRL_REG2, READ_APB_REG(APB_ADAC_POWER_CTRL_REG2)|(1<<7));
-	if(aml_m3_is_hp_pluged()){
-		mute_spk(codec,1);	
-	}
-	else 
-		mute_spk(codec,0);
-	adac_latch();
+#ifdef _AML_PCM_DEBUG_
+			printk("***Entered %s:%s\n", __FILE__,__func__);
+#endif
+/*	aml_set_reg32_mask(P_HHI_GCLK_MPEG0, (1<<18));
+	aml_set_reg32_mask(P_HHI_GCLK_MPEG1, (1<<2)
+								    	|(0xba<<6)
+								   		 );
+	aml_set_reg32_mask(P_HHI_GCLK_OTHER, (1<<18)
+								    	|(0x6<<14)
+								    	);
+*/    aml_set_reg32_mask( P_HHI_AUD_CLK_CNTL, (1 << 8));
+	//printk("P_HHI_GCLK_MPEG0=enable--%#x\n\n", aml_read_reg32(P_HHI_GCLK_MPEG0));
+	//printk("P_HHI_GCLK_MPEG1=enable--%#x\n\n", aml_read_reg32(P_HHI_GCLK_MPEG1));
+	//printk("P_HHI_GCLK_OTHER=enable--%#x\n\n", aml_read_reg32(P_HHI_GCLK_OTHER));
 }
 
-static int aml_clock_gating(unsigned int status)
+static void aml_clock_gating(unsigned int status)
 {
+//printk("-----status=%d\n\n",status);
 	if(status){
 		aml_audio_clock_gating_enable();
 	}
@@ -197,34 +185,23 @@ static int aml_clock_gating(unsigned int status)
 		aml_audio_clock_gating_disable();
 	}
 }
+
 /*--------------------------------------------------------------------------*\
- * audio power gating
- * power up/down the audio module
+ * audio codec power management
 \*--------------------------------------------------------------------------*/
-static void aml_audio_dac_power_gating(int flag)//flag=1 : on; flag=0 : off
-{
-	u32 value;
-	value = READ_APB_REG(APB_ADAC_POWER_CTRL_REG1);
-	if(flag){
-		value |= 3;
-	}
-	else{
-		value &= ~3;
-	}
-	WRITE_APB_REG(APB_ADAC_POWER_CTRL_REG1, value);
-}
-#endif
-static void aml_audio_adc_power_gating(int flag)//flag=1 : on; flag=0 : off
-{
-	u32 value;
-	value = READ_APB_REG(APB_ADAC_POWER_CTRL_REG2);
-	if(flag){
-		value |= 3;
-	}
-	else{
-		value &= ~3;
-	}
-	WRITE_APB_REG(APB_ADAC_POWER_CTRL_REG2, value);
+static int codec_power_switch(struct snd_pcm_substream *substream, unsigned int status)
+{    
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_dai *codec_dai = rtd->codec_dai;
+#ifdef _AML_PCM_DEBUG_
+			printk("***Entered %s:%s\n", __FILE__,__func__);
+#endif	
+	if(status && codec_dai->driver->ops->startup)
+			codec_dai->driver->ops->startup(substream, codec_dai);
+	
+	if(!status && codec_dai->driver->ops->shutdown)
+			codec_dai->driver->ops->shutdown(substream, codec_dai);
+	return 0;
 }
 /*--------------------------------------------------------------------------*\
  * Helper functions
@@ -242,7 +219,7 @@ static int aml_pcm_preallocate_dma_buffer(struct snd_pcm *pcm,
 		buf->dev.dev = pcm->card->dev;
 		buf->private_data = NULL;
         /* one size for i2s output, another for 958, and 128 for alignment */
-		buf->area = dma_alloc_coherent(pcm->card->dev, size+4096,
+		buf->area = dma_alloc_coherent(pcm->card->dev, size*2+128,
 					  &buf->addr, GFP_KERNEL);
 		printk("aml-pcm %d:"
 		"preallocate_dma_buffer: area=%p, addr=%p, size=%d\n", stream,
@@ -250,21 +227,7 @@ static int aml_pcm_preallocate_dma_buffer(struct snd_pcm *pcm,
 		(void *) buf->addr,
 		size);
 
-        aml_pcm_playback_start_addr = buf->area;
-		aml_pcm_playback_end_addr = buf->area + size;
-
-		aml_pcm_playback_phy_start_addr = buf->addr;
-		aml_pcm_playback_phy_end_addr = buf->addr+size;
-
-        /* alloc iec958 buffer */
-        aml_iec958_playback_start_addr = dma_alloc_coherent(pcm->card->dev, size*4,
-           &aml_iec958_playback_start_phy, GFP_KERNEL);
-        if(aml_iec958_playback_start_addr == 0){
-          printk("aml-pcm %d: alloc iec958 buffer failed\n");
-          return -ENOMEM;
-        }
-        aml_iec958_playback_size = size*4;
-        printk("iec958 %d: preallocate dma buffer start=%p, size=%x\n", aml_iec958_playback_start_addr, size*4);
+        aml_pcm_playback_start_addr = (unsigned int)buf->area;
 	}else{
 		size = aml_pcm_capture.buffer_bytes_max;
 		buf->dev.type = SNDRV_DMA_TYPE_DEV;
@@ -278,10 +241,9 @@ static int aml_pcm_preallocate_dma_buffer(struct snd_pcm *pcm,
 		(void *) buf->addr,
 		size);
 
-        aml_pcm_capture_start_addr = buf->area;
-		aml_pcm_capture_end_addr = buf->area+size;
-		aml_pcm_capture_phy_start_addr = buf->addr;
-		aml_pcm_capture_phy_end_addr = buf->addr+size;		
+        aml_pcm_capture_start_addr = (unsigned int)buf->area;
+        aml_pcm_capture_start_phy = buf->addr;
+        aml_pcm_capture_buf_size = size;
 	}
 
 	if (!buf->area)
@@ -311,17 +273,14 @@ static int aml_pcm_hw_params(struct snd_pcm_substream *substream,
 
 	snd_pcm_set_runtime_buffer(substream, &substream->dma_buffer);
 	runtime->dma_bytes = params_buffer_bytes(params);
-	if(substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
-		aml_iec958_playback_size = runtime->dma_bytes*4;
+
 	s->I2S_addr = runtime->dma_addr;
 
-    /*
-     * Both capture and playback need to reset the last ptr to the start address
-     * */
-    //if(substream->stream == SNDRV_PCM_STREAM_PLAYBACK){
+
+    if(substream->stream == SNDRV_PCM_STREAM_PLAYBACK){
         /* s->last_ptr must initialized as dma buffer's start addr */
         s->last_ptr = runtime->dma_addr;
-    //}
+    }
 	
 	return 0;
 }
@@ -335,138 +294,6 @@ static int aml_pcm_hw_free(struct snd_pcm_substream *substream)
 	}
 
 	return 0;
-}
-/*
-the I2S hw  and IEC958 PCM output initation,958 initation here, 
-for the case that only use our ALSA driver for PCM s/pdif output.
-*/
-static void  aml_hw_i2s_init(struct snd_pcm_runtime *runtime)
-{
-
-      
-		switch(runtime->format){
-		case SNDRV_PCM_FORMAT_S32_LE:
-			I2S_MODE = AIU_I2S_MODE_PCM32;
-		// IEC958_MODE = AIU_958_MODE_PCM32;
-			break;
-		case SNDRV_PCM_FORMAT_S24_LE:
-			I2S_MODE = AIU_I2S_MODE_PCM24;
-		// IEC958_MODE = AIU_958_MODE_PCM24;
-			break;
-		case SNDRV_PCM_FORMAT_S16_LE:
-			I2S_MODE = AIU_I2S_MODE_PCM16;
-		// IEC958_MODE = AIU_958_MODE_PCM16;
-			break;
-		}
-		audio_set_i2s_mode(I2S_MODE);
-		audio_set_aiubuf(runtime->dma_addr, runtime->dma_bytes);
-		memset((void*)runtime->dma_area,0,runtime->dma_bytes + 4096);
-		/* update the i2s hw buffer end addr as android may update that */
-		aml_pcm_playback_phy_end_addr = aml_pcm_playback_phy_start_addr+runtime->dma_bytes;
-		printk("I2S hw init,i2s mode %d\n",I2S_MODE);
-
-}
-static int audio_notify_hdmi_info(int audio_type, void *v){
-    struct snd_pcm_substream *substream =(struct snd_pcm_substream*)v;
-	if(substream->runtime->rate != audio_sr_info || audio_type_info != audio_type){
-		printk("audio info changed.notify to hdmi: type %d,sr %d\n",audio_type,substream->runtime->rate);
-		aout_notifier_call_chain(audio_type,v);
-	}
-	audio_sr_info = substream->runtime->rate;
-	audio_type_info = audio_type;
-	
-}
-static void iec958_notify_hdmi_info()
-{
-	unsigned audio_type = AOUT_EVENT_IEC_60958_PCM;
-	if(playback_substream_handle){
-		if(IEC958_mode_codec == 2) //dd
-			audio_type = AOUT_EVENT_RAWDATA_AC_3;
-		else if(IEC958_mode_codec == 4)//dd+
-			audio_type = AOUT_EVENT_RAWDATA_DOBLY_DIGITAL_PLUS;
-		else if(IEC958_mode_codec == 1|| IEC958_mode_codec == 3)//dts
-			audio_type = AOUT_EVENT_RAWDATA_DTS;
-		else 
-			audio_type = AOUT_EVENT_IEC_60958_PCM;
-		printk("iec958 nodify hdmi audio type %d\n",	audio_type);
-		audio_notify_hdmi_info(audio_type, (struct snd_pcm_substream *)playback_substream_handle);
-	}
-	else{
-		printk("substream for playback NULL\n");
-	}
-		
-}
-/*
-special call by the audiodsp,add these code,as there are three cases for 958 s/pdif output
-1)NONE-PCM  raw output ,only available when ac3/dts audio,when raw output mode is selected by user.
-2)PCM  output for  all audio, when pcm mode is selected by user .
-3)PCM  output for audios except ac3/dts,when raw output mode is selected by user
-*/
-static void aml_hw_iec958_init(void)
-{
-    _aiu_958_raw_setting_t set;
-    _aiu_958_channel_status_t chstat;
-    unsigned start,size;
-	memset((void*)(&set), 0, sizeof(set));
-	memset((void*)(&chstat), 0, sizeof(chstat));
-	set.chan_stat = &chstat;
-   	/* case 1,raw mode enabled */
-	if(IEC958_mode_codec){
-	  if(IEC958_mode_codec == 1){ //dts, use raw sync-word mode
-	    	IEC958_MODE = AIU_958_MODE_RAW;
-			printk("iec958 mode RAW\n");
-	  }	
-	  else{ //ac3,use the same pcm mode as i2s configuration
-		IEC958_MODE = AIU_958_MODE_PCM_RAW;
-		printk("iec958 mode %s\n",(I2S_MODE == AIU_I2S_MODE_PCM32)?"PCM32_RAW":((I2S_MODE == AIU_I2S_MODE_PCM24)?"PCM24_RAW":"PCM16_RAW"));				
-	  }	
-	}else{	/* case 2,3 */
-	  if(I2S_MODE == AIU_I2S_MODE_PCM32)
-	  	IEC958_MODE = AIU_958_MODE_PCM32;
-	  else if(I2S_MODE == AIU_I2S_MODE_PCM24)
-	  	IEC958_MODE = AIU_958_MODE_PCM24;
-	  else		
-	  	IEC958_MODE = AIU_958_MODE_PCM16;
-  	  printk("iec958 mode %s\n",(I2S_MODE == AIU_I2S_MODE_PCM32)?"PCM32":((I2S_MODE == AIU_I2S_MODE_PCM24)?"PCM24":"PCM16"));
-	}
-
-	if(IEC958_MODE == AIU_958_MODE_PCM16 || IEC958_MODE == AIU_958_MODE_PCM24 ||
-	  IEC958_MODE == AIU_958_MODE_PCM32){
-	    set.chan_stat->chstat0_l = 0x0100;
-		set.chan_stat->chstat0_r = 0x0100;
-		set.chan_stat->chstat1_l = 0X200;
-		set.chan_stat->chstat1_r = 0X200;              
-        start = (aml_pcm_playback_phy_start_addr);
-        size = aml_pcm_playback_phy_end_addr - aml_pcm_playback_phy_start_addr;
-		audio_set_958outbuf(start, size, 0);
-	  }else{
-		set.chan_stat->chstat0_l = 0x1902;//NONE-PCM
-		set.chan_stat->chstat0_r = 0x1902;
-		set.chan_stat->chstat1_l = 0X200;
-		set.chan_stat->chstat1_r = 0X200;
-        // start = ((aml_pcm_playback_phy_end_addr + 4096)&(~127));
-        // size  = aml_pcm_playback_phy_end_addr - aml_pcm_playback_phy_start_addr;
-        start = aml_iec958_playback_start_phy;
-        size = aml_iec958_playback_size;
-		audio_set_958outbuf(start, size, (IEC958_MODE == AIU_958_MODE_RAW)?1:0);
-		memset((void*)aml_iec958_playback_start_addr,0,size);
-		
-	}
-	audio_set_958_mode(IEC958_MODE, &set);
-	if(IEC958_mode_codec == 4)  //dd+
-		WRITE_MPEG_REG_BITS(AIU_CLK_CTRL, 0, 4, 2); // 4x than i2s
-	else
-		WRITE_MPEG_REG_BITS(AIU_CLK_CTRL, 3, 4, 2);
-	iec958_notify_hdmi_info();
-
-
-}
-
-void	aml_alsa_hw_reprepare()
-{
-	/* diable 958 module before call initiation */
-	audio_hw_958_enable(0);
-  aml_hw_iec958_init();
 }
 
 static int aml_pcm_prepare(struct snd_pcm_substream *substream)
@@ -529,8 +356,43 @@ static int aml_pcm_prepare(struct snd_pcm_substream *substream)
 	audio_set_clk(s->sample_rate, AUDIO_CLK_256FS);
 	audio_util_set_dac_format(AUDIO_ALGOUT_DAC_FORMAT_DSP);
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK){
-		aml_hw_i2s_init(runtime);		
-		aml_hw_iec958_init();
+			//printk("aml_pcm_prepare SNDRV_PCM_STREAM_PLAYBACK: dma_addr=%x, dma_bytes=%x\n", runtime->dma_addr, runtime->dma_bytes);
+	        _aiu_958_channel_status_t set;
+		 _aiu_958_raw_setting_t	raw_set;	
+		 memset((void*)(&raw_set), 0, sizeof(raw_set));
+		 memset((void*)(&set), 0, sizeof(set));
+		 raw_set.chan_stat = &set;
+            audio_set_aiubuf(runtime->dma_addr, runtime->dma_bytes);
+            
+            switch(runtime->format){
+              case SNDRV_PCM_FORMAT_S32_LE:
+                I2S_MODE = AIU_I2S_MODE_PCM32;
+                IEC958_MODE = AIU_958_MODE_PCM32;
+                break;
+              case SNDRV_PCM_FORMAT_S24_LE:
+                I2S_MODE = AIU_I2S_MODE_PCM24;
+                IEC958_MODE = AIU_958_MODE_PCM24;
+                break;
+              case SNDRV_PCM_FORMAT_S16_LE:
+                I2S_MODE = AIU_I2S_MODE_PCM16;
+                IEC958_MODE = AIU_958_MODE_PCM16;
+                break;
+            }
+            audio_set_i2s_mode(I2S_MODE);
+
+            if(IEC958_MODE == AIU_958_MODE_PCM16 || IEC958_MODE == AIU_958_MODE_PCM24 || 
+                IEC958_MODE == AIU_958_MODE_PCM32){
+              set.chstat0_l = 0x0100;
+              set.chstat0_r = 0x0100;
+              audio_set_958outbuf(runtime->dma_addr, runtime->dma_bytes);
+            }else{
+              set.chstat0_l = 0x1902;
+              set.chstat0_r = 0x1902;
+              audio_set_958outbuf((runtime->dma_addr+runtime->dma_bytes+127)&(~127), runtime->dma_bytes);
+            }
+            audio_set_958_mode(IEC958_MODE, &raw_set);
+
+			memset((void*)runtime->dma_area,0,runtime->dma_bytes * 2 + 128);
 	}
 	else{
 			//printk("aml_pcm_prepare SNDRV_PCM_STREAM_CAPTURE: dma_addr=%x, dma_bytes=%x\n", runtime->dma_addr, runtime->dma_bytes);
@@ -542,22 +404,8 @@ static int aml_pcm_prepare(struct snd_pcm_substream *substream)
 			  ppp[1] = 0x78787878;
             }
 	}
-    if( IEC958_MODE == AIU_958_MODE_PCM_RAW){
-		if(IEC958_mode_codec == 4 ){ // need Over clock for dd+
-		    WRITE_MPEG_REG_BITS(AIU_CLK_CTRL, 0, 4, 2);	// 4x than i2s
-		    audio_notify_hdmi_info(AOUT_EVENT_RAWDATA_DOBLY_DIGITAL_PLUS, substream);
-		}else if(IEC958_mode_codec == 3 ||IEC958_mode_codec == 1 ){ // no-over clock for dts pcm mode
-		    audio_notify_hdmi_info(AOUT_EVENT_RAWDATA_DTS, substream);
-		}
-		else  //dd
-			audio_notify_hdmi_info(AOUT_EVENT_RAWDATA_AC_3, substream);
-			
-    }else if(IEC958_mode_codec == 1){
-        audio_notify_hdmi_info(AOUT_EVENT_RAWDATA_DTS, substream);
-    }else{
-	    audio_notify_hdmi_info(AOUT_EVENT_IEC_60958_PCM, substream);
-    }
 
+    aout_notifier_call_chain(AOUT_EVENT_PREPARE, substream);
 #if 0
 	printk("Audio Parameters:\n");
 	printk("\tsample rate: %d\n", runtime->rate);
@@ -566,7 +414,6 @@ static int aml_pcm_prepare(struct snd_pcm_substream *substream)
     printk("\tformat: %s\n", snd_pcm_format_name(runtime->format));
 	printk("\tperiod size: %ld\n", runtime->period_size);
 	printk("\tperiods: %d\n", runtime->periods);
-    printk("\tiec958 mode: %d, raw=%d, codec=%d\n", IEC958_MODE, IEC958_mode_raw, IEC958_mode_codec);
 #endif	
 	
 	return 0;
@@ -579,96 +426,100 @@ static int aml_pcm_trigger(struct snd_pcm_substream *substream,
 	struct aml_runtime_data *prtd = rtd->private_data;
 	audio_stream_t *s = &prtd->s;
 	int ret = 0;
-	
-	spin_lock(&s->lock);
+
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_START:
-		
-		del_timer_sync(&prtd->timer);
-		
-		prtd->timer.expires = jiffies + 1;
-    del_timer(&prtd->timer);
-    add_timer(&prtd->timer);
-        
-		// TODO
-		if(substream->stream == SNDRV_PCM_STREAM_PLAYBACK){
-		//    printk("aml_pcm_trigger: playback start\n");
-#if defined(CONFIG_SND_AML_M3)
-			clock_gating_status |= clock_gating_playback;
-			aml_clock_gating(clock_gating_status);
+#ifdef CONFIG_ARCH_MESON6	
+	  switch_mod_gate_by_type(MOD_AUDIO, 1);
 #endif
-			audio_enable_ouput(1);
-		}else{
-		//	printk("aml_pcm_trigger: capture start\n");
-#if defined(CONFIG_SND_AML_M3)
-			clock_gating_status |= clock_gating_capture;
-			aml_clock_gating(clock_gating_status);
-#endif
-			audio_in_i2s_enable(1);
-            {
-              int * ppp = (int*)(rtd->dma_area+rtd->dma_bytes*2-8);
-			  ppp[0] = 0x78787878;
-			  ppp[1] = 0x78787878;
-            }
+    
+	  del_timer_sync(&prtd->timer);
+	  spin_lock(&s->lock);
 
-		}
+	  prtd->timer.expires = jiffies + 1;
+	  del_timer(&prtd->timer);
+	  add_timer(&prtd->timer);
+        
+	  // TODO
+	  if(substream->stream == SNDRV_PCM_STREAM_PLAYBACK){
+	  //    printk("aml_pcm_trigger: playback start\n");
+			clock_gating_status |= clock_gating_playback;
+			//aml_clock_gating(clock_gating_status);
+			//codec_power_switch(substream, clock_gating_status);
+		audio_enable_ouput(1);
+	  }else{
+	  //	printk("aml_pcm_trigger: capture start\n");
+			clock_gating_status |= clock_gating_capture;
+			//aml_clock_gating(clock_gating_status);
+			//codec_power_switch(substream, clock_gating_status);
+		audio_in_i2s_enable(1);
+	      {
+		  int * ppp = (int*)(rtd->dma_area+rtd->dma_bytes*2-8);
+		  ppp[0] = 0x78787878;
+		  ppp[1] = 0x78787878;
+	      }
+
+	  }
 		
-		s->active = 1;
-		
-		break;		/* SNDRV_PCM_TRIGGER_START */
+	  s->active = 1;
+	  spin_unlock(&s->lock);
+	  break;		/* SNDRV_PCM_TRIGGER_START */
 	case SNDRV_PCM_TRIGGER_SUSPEND:
 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
 	case SNDRV_PCM_TRIGGER_STOP:
 		// TODO
-		s->active = 0;
-		if(substream->stream == SNDRV_PCM_STREAM_PLAYBACK){
+	    spin_lock(&s->lock);
+	    s->active = 0;
+	    if(substream->stream == SNDRV_PCM_STREAM_PLAYBACK){
         //    printk("aml_pcm_trigger: playback stop\n");
-				audio_enable_ouput(0);
-#if defined(CONFIG_SND_AML_M3)
+	  	audio_enable_ouput(0);
 			clock_gating_status &= clock_gating_capture;
-			aml_clock_gating(clock_gating_status);
-#endif
-		}else{
-        //    printk("aml_pcm_trigger: capture stop\n");
-				audio_in_i2s_enable(0);
-#if defined(CONFIG_SND_AML_M3)
-			clock_gating_status &= clock_gating_playback;
 			//aml_clock_gating(clock_gating_status);
+			//codec_power_switch(substream, clock_gating_status);
+	    }else{
+        //    printk("aml_pcm_trigger: capture stop\n");
+		audio_in_i2s_enable(0);
+	    }
+#ifdef CONFIG_ARCH_MESON6			
+	    switch_mod_gate_by_type(MOD_AUDIO, 0);
 #endif
-		}
-		break;
+
+	    spin_unlock(&s->lock);
+	    break;
 
 	case SNDRV_PCM_TRIGGER_RESUME:
 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
 		// TODO
-		s->active = 1;
-		if(substream->stream == SNDRV_PCM_STREAM_PLAYBACK){
+	    spin_lock(&s->lock);
+#ifdef CONFIG_ARCH_MESON6	
+	    switch_mod_gate_by_type(MOD_AUDIO, 1);
+#endif
+	    s->active = 1;
+	    if(substream->stream == SNDRV_PCM_STREAM_PLAYBACK){
         //    printk("aml_pcm_trigger: playback resume\n");
-				audio_enable_ouput(1);
-#if defined(CONFIG_SND_AML_M3)
+		audio_enable_ouput(1);
 			clock_gating_status |= clock_gating_playback;
-			aml_clock_gating(clock_gating_status);
-#endif
-		}else{
+			//aml_clock_gating(clock_gating_status);
+			//codec_power_switch(substream, clock_gating_status);
+	    }else{
         //    printk("aml_pcm_trigger: capture resume\n");
-			  audio_in_i2s_enable(1);
-#if defined(CONFIG_SND_AML_M3)
+	        audio_in_i2s_enable(1);
 			clock_gating_status |= clock_gating_capture;
-			aml_clock_gating(clock_gating_status);
-#endif
-              {
-                int * ppp = (int*)(rtd->dma_area+rtd->dma_bytes*2-8);
-			    ppp[0] = 0x78787878;
-			    ppp[1] = 0x78787878;
-              }
-		}
-		
-		break;
-
+			//aml_clock_gating(clock_gating_status);
+			//codec_power_switch(substream, clock_gating_status);
+		{
+		    int * ppp = (int*)(rtd->dma_area+rtd->dma_bytes*2-8);
+		    ppp[0] = 0x78787878;
+		    ppp[1] = 0x78787878;
+	        }
+	    }
+	    spin_unlock(&s->lock);
+	    break;
 	default:
 		ret = -EINVAL;
 	}
-	spin_unlock(&s->lock);
+	aml_pcm_work.substream = substream;
+	schedule_work(&aml_pcm_work.aml_codec_workqueue);
 	return ret;
 }
 
@@ -757,12 +608,19 @@ static int aml_pcm_open(struct snd_pcm_substream *substream)
 	int ret = 0;
 
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK){
-		playback_substream_handle = (unsigned long)substream;		
 		snd_soc_set_runtime_hwparams(substream, &aml_pcm_hardware);
 	}else{
 		snd_soc_set_runtime_hwparams(substream, &aml_pcm_capture);
 	}
 	
+    /* ensure that peroid size is a multiple of 32bytes */
+	ret = snd_pcm_hw_constraint_list(runtime, 0, SNDRV_PCM_HW_PARAM_PERIOD_BYTES, &hw_constraints_period_sizes);
+	if (ret < 0)
+	{
+		printk("set period bytes constraint error\n");
+		goto out;
+	}
+
 	/* ensure that buffer size is a multiple of period size */
 	ret = snd_pcm_hw_constraint_integer(runtime,
 						SNDRV_PCM_HW_PARAM_PERIODS);
@@ -798,14 +656,7 @@ static int aml_pcm_close(struct snd_pcm_substream *substream)
 	del_timer_sync(&prtd->timer);
 	
 	kfree(prtd);
-	if(substream->stream == SNDRV_PCM_STREAM_CAPTURE)
-    {
-#if defined(CONFIG_SND_AML_M3)
-	aml_audio_clock_gating_disable();
-#endif
-    }
-	else if(substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
-		playback_substream_handle = 0;
+	
 	return 0;
 }
 
@@ -993,14 +844,14 @@ static int aml_pcm_new(struct snd_card *card,
 	if (!card->dev->coherent_dma_mask)
 		card->dev->coherent_dma_mask = 0xffffffff;
 
-	if (dai->playback.channels_min) {
+	if (dai->driver->playback.channels_min) {
 		ret = aml_pcm_preallocate_dma_buffer(pcm,
 			SNDRV_PCM_STREAM_PLAYBACK);
 		if (ret)
 			goto out;
 	}
 
-	if (dai->capture.channels_min) {
+	if (dai->driver->capture.channels_min) {
 		pr_debug("aml-pcm:"
 				"Allocating PCM capture DMA buffer\n");
 		ret = aml_pcm_preallocate_dma_buffer(pcm,
@@ -1032,17 +883,11 @@ static void aml_pcm_free_dma_buffers(struct snd_pcm *pcm)
 	}
     aml_pcm_playback_start_addr = 0;
     aml_pcm_capture_start_addr  = 0;
-
-    if(aml_iec958_playback_start_addr){
-      dma_free_coherent(pcm->card->dev, aml_iec958_playback_size, aml_iec958_playback_start_addr, aml_iec958_playback_start_phy);
-      aml_iec958_playback_start_addr = 0;
-    }
 }
 
 #ifdef CONFIG_PM
-static int aml_pcm_suspend(struct snd_soc_dai_link *dai_link)
+static int aml_pcm_suspend(struct snd_soc_dai *dai)
 {
-#if 0
 	struct snd_pcm_runtime *runtime = dai->runtime;
 	struct aml_runtime_data *prtd;
 	struct aml_pcm_dma_params *params;
@@ -1051,7 +896,6 @@ static int aml_pcm_suspend(struct snd_soc_dai_link *dai_link)
 
 	prtd = runtime->private_data;
 	params = prtd->params;
-#endif
 
 	/* disable the PDC and save the PDC registers */
 	// TODO
@@ -1060,9 +904,8 @@ static int aml_pcm_suspend(struct snd_soc_dai_link *dai_link)
 	return 0;
 }
 
-static int aml_pcm_resume(struct snd_soc_dai_link *dai_link)
+static int aml_pcm_resume(struct snd_soc_dai *dai)
 {
-#if 0
 	struct snd_pcm_runtime *runtime = dai->runtime;
 	struct aml_runtime_data *prtd;
 	struct aml_pcm_dma_params *params;
@@ -1071,7 +914,6 @@ static int aml_pcm_resume(struct snd_soc_dai_link *dai_link)
 
 	prtd = runtime->private_data;
 	params = prtd->params;
-#endif
 
 	/* restore the PDC registers and enable the PDC */
 	// TODO
@@ -1303,17 +1145,16 @@ static void aml_pcm_cleanup_debugfs(void)
 	debugfs_remove_recursive(debugfs_root);
 }
 #else
-static void aml_pcm_init_debugfs()
+static void aml_pcm_init_debugfs(void)
 {
 }
-static void aml_pcm_cleanup_debugfs()
+static void aml_pcm_cleanup_debugfs(void)
 {
 }
 #endif
 
-struct snd_soc_platform aml_soc_platform = {
-	.name		= "aml-audio",
-	.pcm_ops 	= &aml_pcm_ops,
+struct snd_soc_platform_driver aml_soc_platform = {
+	.ops 	= &aml_pcm_ops,
 	.pcm_new	= aml_pcm_new,
 	.pcm_free	= aml_pcm_free_dma_buffers,
 	.suspend	= aml_pcm_suspend,
@@ -1322,18 +1163,38 @@ struct snd_soc_platform aml_soc_platform = {
 
 EXPORT_SYMBOL_GPL(aml_soc_platform);
 
+static int __devinit aml_soc_platform_probe(struct platform_device *pdev)
+{
+	INIT_WORK(&aml_pcm_work.aml_codec_workqueue, aml_codec_power_switch_queue);
+	return snd_soc_register_platform(&pdev->dev, &aml_soc_platform);
+}
+
+static int __devexit aml_soc_platform_remove(struct platform_device *pdev)
+{
+	snd_soc_unregister_platform(&pdev->dev);
+	return 0;
+}
+
+static struct platform_driver aml_pcm_driver = {
+	.driver = {
+			.name = "aml-audio",
+			.owner = THIS_MODULE,
+	},
+
+	.probe = aml_soc_platform_probe,
+	.remove = __devexit_p(aml_soc_platform_remove),
+};
+
 static int __init aml_alsa_audio_init(void)
 {
-		aml_pcm_init_debugfs();
-		
-		return snd_soc_register_platform(&aml_soc_platform);
-
+	aml_pcm_init_debugfs();		
+	return platform_driver_register(&aml_pcm_driver);
 }
 
 static void __exit aml_alsa_audio_exit(void)
 {
-		aml_pcm_cleanup_debugfs();
-        snd_soc_unregister_platform(&aml_soc_platform);
+	aml_pcm_cleanup_debugfs();
+    platform_driver_unregister(&aml_pcm_driver);
 }
 
 module_init(aml_alsa_audio_init);
@@ -1341,7 +1202,4 @@ module_exit(aml_alsa_audio_exit);
 
 MODULE_AUTHOR("AMLogic, Inc.");
 MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("AML driver for ALSA");
-
-//module_param(id, charp, 0444);
-MODULE_PARM_DESC(id, "ID string for AML soundcard.");
+MODULE_DESCRIPTION("AML audio driver for ALSA");
