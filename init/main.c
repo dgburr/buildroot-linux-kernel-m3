@@ -424,7 +424,6 @@ static void __init setup_command_line(char *command_line)
 static __initdata DECLARE_COMPLETION(kthreadd_done);
 
 static noinline void __init_refok rest_init(void)
-	__releases(kernel_lock)
 {
 	int pid;
 
@@ -826,7 +825,6 @@ void build_console(void)
  * makes it inline to init() and it becomes part of init.text section
  */
 static noinline int init_post(void)
-	__releases(kernel_lock)
 {
 	printk(KERN_INFO "init_post.\n");
 	/* need to finish all async __init code before freeing the memory */
