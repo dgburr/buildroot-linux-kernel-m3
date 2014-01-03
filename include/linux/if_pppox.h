@@ -72,6 +72,7 @@ struct pptp_addr {
 #define PX_PROTO_OPNS 4
 #define PX_MAX_PROTO 5
 #endif
+
 struct sockaddr_pppox {
 	sa_family_t     sa_family;            /* address family, AF_PPPOX */
 	unsigned int    sa_protocol;          /* protocol identifier */
@@ -178,13 +179,6 @@ struct pppolac_opt {
 	int	(*backlog_rcv)(struct sock *sk_udp, struct sk_buff *skb);
 };
 
-struct pptp_opt {
-	struct pptp_addr src_addr;
-	struct pptp_addr dst_addr;
-	u32 ack_sent, ack_recv;
-	u32 seq_sent, seq_recv;
-	int ppp_flags;
-
 struct pppopns_opt {
 	__u16	local;
 	__u16	remote;
@@ -193,6 +187,13 @@ struct pppopns_opt {
 	int	(*backlog_rcv)(struct sock *sk_raw, struct sk_buff *skb);
 };
 
+struct pptp_opt {
+	struct pptp_addr src_addr;
+	struct pptp_addr dst_addr;
+	u32 ack_sent, ack_recv;
+	u32 seq_sent, seq_recv;
+	int ppp_flags;
+};
 #include <net/sock.h>
 
 struct pppox_sock {
