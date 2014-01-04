@@ -226,7 +226,9 @@ static void rt2x00usb_interrupt_txdone(struct urb *urb)
 	 * Schedule the delayed work for reading the TX status
 	 * from the device.
 	 */
-	ieee80211_queue_work(rt2x00dev->hw, &rt2x00dev->txdone_work);
+	if (test_bit(DEVICE_STATE_PRESENT, &rt2x00dev->flags) &&
+	    test_bit(DEVICE_STATE_ENABLED_RADIO, &rt2x00dev->flags))
+		ieee80211_queue_work(rt2x00dev->hw, &rt2x00dev->txdone_work);
 }
 
 static void rt2x00usb_kick_tx_entry(struct queue_entry *entry)
@@ -235,7 +237,6 @@ static void rt2x00usb_kick_tx_entry(struct queue_entry *entry)
 	struct usb_device *usb_dev = to_usb_device_intf(rt2x00dev->dev);
 	struct queue_entry_priv_usb *entry_priv = entry->priv_data;
 	u32 length;
-	int status;
 
 	if (!test_and_clear_bit(ENTRY_DATA_PENDING, &entry->flags))
 		return;
@@ -252,10 +253,7 @@ static void rt2x00usb_kick_tx_entry(struct queue_entry *entry)
 			  entry->skb->data, length,
 			  rt2x00usb_interrupt_txdone, entry);
 
-	status = usb_submit_urb(entry_priv->urb, GFP_ATOMIC);
-	if (status) {
-		if (status == -ENODEV)
-			clear_bit(DEVICE_STATE_PRESENT, &rt2x00dev->flags);
+	if (usb_submit_urb(entry_priv->urb, GFP_ATOMIC)) {
 		set_bit(ENTRY_DATA_IO_FAILED, &entry->flags);
 		rt2x00lib_dmadone(entry);
 	}
@@ -426,7 +424,9 @@ static void rt2x00usb_interrupt_rxdone(struct urb *urb)
 	 * Schedule the delayed work for reading the RX status
 	 * from the device.
 	 */
-	ieee80211_queue_work(rt2x00dev->hw, &rt2x00dev->rxdone_work);
+	if (test_bit(DEVICE_STATE_PRESENT, &rt2x00dev->flags) &&
+	    test_bit(DEVICE_STATE_ENABLED_RADIO, &rt2x00dev->flags))
+		ieee80211_queue_work(rt2x00dev->hw, &rt2x00dev->rxdone_work);
 }
 
 /*
@@ -454,7 +454,6 @@ void rt2x00usb_clear_entry(struct queue_entry *entry)
 	    to_usb_device_intf(entry->queue->rt2x00dev->dev);
 	struct queue_entry_priv_usb *entry_priv = entry->priv_data;
 	int pipe;
-	int status;
 
 	entry->flags = 0;
 
@@ -465,12 +464,7 @@ void rt2x00usb_clear_entry(struct queue_entry *entry)
 				rt2x00usb_interrupt_rxdone, entry);
 
 		set_bit(ENTRY_OWNER_DEVICE_DATA, &entry->flags);
-
-		status = usb_submit_urb(entry_priv->urb, GFP_ATOMIC);
-		if (status) {
-			if (status == -ENODEV)
-				clear_bit(DEVICE_STATE_PRESENT,
-					  &entry->queue->rt2x00dev->flags);
+		if (usb_submit_urb(entry_priv->urb, GFP_ATOMIC)) {
 			set_bit(ENTRY_DATA_IO_FAILED, &entry->flags);
 			rt2x00lib_dmadone(entry);
 		}

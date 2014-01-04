@@ -781,14 +781,12 @@ int proc_begin_dma(void *hprocessor, void *pmpu_addr, u32 ul_size,
 							(u32)pmpu_addr,
 							ul_size, dir);
 
-	mutex_lock(&proc_lock);
-
 	/* find requested memory are in cached mapping information */
 	map_obj = find_containing_mapping(pr_ctxt, (u32) pmpu_addr, ul_size);
 	if (!map_obj) {
 		pr_err("%s: find_containing_mapping failed\n", __func__);
 		status = -EFAULT;
-		goto no_map;
+		goto err_out;
 	}
 
 	if (memory_give_ownership(map_obj, (u32) pmpu_addr, ul_size, dir)) {
@@ -797,8 +795,6 @@ int proc_begin_dma(void *hprocessor, void *pmpu_addr, u32 ul_size,
 		status = -EFAULT;
 	}
 
-no_map:
-	mutex_unlock(&proc_lock);
 err_out:
 
 	return status;
@@ -823,24 +819,21 @@ int proc_end_dma(void *hprocessor, void *pmpu_addr, u32 ul_size,
 							(u32)pmpu_addr,
 							ul_size, dir);
 
-	mutex_lock(&proc_lock);
-
 	/* find requested memory are in cached mapping information */
 	map_obj = find_containing_mapping(pr_ctxt, (u32) pmpu_addr, ul_size);
 	if (!map_obj) {
 		pr_err("%s: find_containing_mapping failed\n", __func__);
 		status = -EFAULT;
-		goto no_map;
+		goto err_out;
 	}
 
 	if (memory_regain_ownership(map_obj, (u32) pmpu_addr, ul_size, dir)) {
 		pr_err("%s: InValid address parameters %p %x\n",
 		       __func__, pmpu_addr, ul_size);
 		status = -EFAULT;
+		goto err_out;
 	}
 
-no_map:
-	mutex_unlock(&proc_lock);
 err_out:
 	return status;
 }
@@ -1733,8 +1726,9 @@ int proc_un_map(void *hprocessor, void *map_addr,
 		    (p_proc_object->hbridge_context, va_align, size_align);
 	}
 
+	mutex_unlock(&proc_lock);
 	if (status)
-		goto unmap_failed;
+		goto func_end;
 
 	/*
 	 * A successful unmap should be followed by removal of map_obj
@@ -1742,9 +1736,6 @@ int proc_un_map(void *hprocessor, void *map_addr,
 	 * remains uptodate
 	 */
 	remove_mapping_information(pr_ctxt, (u32) map_addr, size_align);
-
-unmap_failed:
-	mutex_unlock(&proc_lock);
 
 func_end:
 	dev_dbg(bridge, "%s: hprocessor: 0x%p map_addr: 0x%p status: 0x%x\n",

@@ -169,14 +169,8 @@ static int proc_taint(struct ctl_table *table, int write,
 			       void __user *buffer, size_t *lenp, loff_t *ppos);
 #endif
 
-#ifdef CONFIG_PRINTK
-static int proc_dmesg_restrict(struct ctl_table *table, int write,
-				void __user *buffer, size_t *lenp, loff_t *ppos);
-#endif
-
 #ifdef CONFIG_MAGIC_SYSRQ
-/* Note: sysrq code uses it's own private copy */
-static int __sysrq_enabled = SYSRQ_DEFAULT_ENABLE;
+static int __sysrq_enabled; /* Note: sysrq code ises it's own private copy */
 
 static int sysrq_sysctl_handler(ctl_table *table, int write,
 				void __user *buffer, size_t *lenp,
@@ -1482,7 +1476,7 @@ static struct ctl_table fs_table[] = {
 		.data		= &suid_dumpable,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
-		.proc_handler	= proc_dmesg_restrict,
+		.proc_handler	= proc_dointvec_minmax,
 		.extra1		= &zero,
 		.extra2		= &two,
 	},
@@ -2412,17 +2406,6 @@ static int proc_taint(struct ctl_table *table, int write,
 
 	return err;
 }
-
-#ifdef CONFIG_PRINTK
-static int proc_dmesg_restrict(struct ctl_table *table, int write,
-				void __user *buffer, size_t *lenp, loff_t *ppos)
-{
-	if (write && !capable(CAP_SYS_ADMIN))
-		return -EPERM;
-
-	return proc_dointvec_minmax(table, write, buffer, lenp, ppos);
-}
-#endif
 
 struct do_proc_dointvec_minmax_conv_param {
 	int *min;

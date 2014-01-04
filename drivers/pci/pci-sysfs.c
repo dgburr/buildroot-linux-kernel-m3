@@ -23,7 +23,6 @@
 #include <linux/mm.h>
 #include <linux/fs.h>
 #include <linux/capability.h>
-#include <linux/security.h>
 #include <linux/pci-aspm.h>
 #include <linux/slab.h>
 #include "pci.h"
@@ -369,7 +368,7 @@ pci_read_config(struct file *filp, struct kobject *kobj,
 	u8 *data = (u8*) buf;
 
 	/* Several chips lock up trying to read undefined config space */
-	if (security_capable(filp->f_cred, CAP_SYS_ADMIN) == 0) {
+	if (cap_raised(filp->f_cred->cap_effective, CAP_SYS_ADMIN)) {
 		size = dev->cfg_size;
 	} else if (dev->hdr_type == PCI_HEADER_TYPE_CARDBUS) {
 		size = 128;
@@ -1088,7 +1087,7 @@ static int pci_create_capabilities_sysfs(struct pci_dev *dev)
 		attr->write = write_vpd_attr;
 		retval = sysfs_create_bin_file(&dev->dev.kobj, attr);
 		if (retval) {
-			kfree(attr);
+			kfree(dev->vpd->attr);
 			return retval;
 		}
 		dev->vpd->attr = attr;

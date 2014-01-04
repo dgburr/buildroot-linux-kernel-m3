@@ -477,17 +477,21 @@ nfs_decode_dirent(struct xdr_stream *xdr, struct nfs_entry *entry, struct nfs_se
 	entry->ino	  = ntohl(*p++);
 	entry->len	  = ntohl(*p++);
 
-	p = xdr_inline_decode(xdr, entry->len);
+	p = xdr_inline_decode(xdr, entry->len + 4);
 	if (unlikely(!p))
 		goto out_overflow;
 	entry->name	  = (const char *) p;
-	p = xdr_inline_decode(xdr, 4);
-	if (unlikely(!p))
-		goto out_overflow;
+	p		 += XDR_QUADLEN(entry->len);
 	entry->prev_cookie	  = entry->cookie;
 	entry->cookie	  = ntohl(*p++);
 
 	entry->d_type = DT_UNKNOWN;
+
+	p = xdr_inline_peek(xdr, 8);
+	if (p != NULL)
+		entry->eof = !p[0] && p[1];
+	else
+		entry->eof = 0;
 
 	return p;
 

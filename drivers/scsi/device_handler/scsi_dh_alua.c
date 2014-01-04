@@ -285,8 +285,7 @@ static void stpg_endio(struct request *req, int error)
 			    print_alua_state(h->state));
 	}
 done:
-	req->end_io_data = NULL;
-	__blk_put_request(req->q, req);
+	blk_put_request(req);
 	if (h->callback_fn) {
 		h->callback_fn(h->callback_data, err);
 		h->callback_fn = h->callback_data = NULL;

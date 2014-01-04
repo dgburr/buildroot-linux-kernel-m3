@@ -426,6 +426,7 @@ error3:
 error2:
 	list_del(&new->list);
 error1:
+	kfree(new);
 	return ret;
 }
 
