@@ -30,9 +30,10 @@
 #define UART_STAT_MASK_TFIFO_FULL               (1<<21)
 #define UART_STAT_MASK_TFIFO_EMPTY              (1<<22)
 
-		.macro	addruart, rx, tmp
-@		ldr	\rx, =AOBUS_REG_ADDR(AO_UART_WFIFO)		@ physical
-		ldr	\rx, =0xc81004c0		@ physical
+		.macro  addruart, rp, rv
+@		ldr     \rp, =AOBUS_REG_ADDR(AO_UART_WFIFO)             @ physical
+		ldr     \rp, =0xc81004c0                @ physical
+		ldr     \rv, =0xf81004c0                @ virtual
 		.endm
 
 		.macro	senduart, rd, rx
