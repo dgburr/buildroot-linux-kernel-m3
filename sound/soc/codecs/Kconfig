@@ -26,7 +26,6 @@ config SND_SOC_ALL_CODECS
 	select SND_SOC_CS42L51 if I2C
 	select SND_SOC_CS4270 if I2C
 	select SND_SOC_CX20442
-	select SND_SOC_CS42L52 if I2C
 	select SND_SOC_DA7210 if I2C
 	select SND_SOC_JZ4740_CODEC if SOC_JZ4740
 	select SND_SOC_MAX98088 if I2C
@@ -150,9 +149,6 @@ config SND_SOC_CS4270
 config SND_SOC_CS4270_VD33_ERRATA
 	bool
 	depends on SND_SOC_CS4270
-
-config SND_SOC_CS42L52
-	tristate
 
 config SND_SOC_CX20442
 	tristate

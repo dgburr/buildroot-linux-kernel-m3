@@ -36,6 +36,7 @@
 #include <linux/vmalloc.h>
 #include <linux/sched.h>
 #include <linux/version.h>
+#include <linux/semaphore.h>
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,34)
 #include <linux/dma-mapping.h>
@@ -210,7 +211,7 @@ MODULE_PARM_DESC(allowOverlap,
     "\n\t\t allocated to kernel physical mem (via mem=xxx)");
 module_param(allowOverlap, int, S_IRUGO);
 
-static DECLARE_MUTEX(cmem_mutex);
+static DEFINE_SEMAPHORE(cmem_mutex);
 
 /* Describes a pool buffer */
 typedef struct pool_buffer {

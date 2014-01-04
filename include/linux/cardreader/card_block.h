@@ -238,9 +238,12 @@ static inline void card_claim_host(struct card_host *host)
 extern int sd_mmc_probe(struct memory_card *card);
 extern int sdio_probe(struct memory_card *card);
 extern int inand_probe(struct memory_card *card);
+extern int inand_lp_probe(struct memory_card *card);
 extern int ms_probe(struct memory_card *card);
-extern int add_card_partition(struct gendisk * disk, 
+extern int add_card_partition(struct memory_card* card, struct gendisk * disk,
 		struct mtd_partition * part, unsigned int nr_part);
+extern int card_init_inand_lp(struct memory_card* card);
+extern void card_remove_inand_lp(struct card_host* host);
 
 extern unsigned int card_align_data_size(struct memory_card *card, unsigned int sz);
 extern void card_init_card(struct memory_card *card, struct card_host *host);

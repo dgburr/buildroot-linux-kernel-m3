@@ -4315,7 +4315,7 @@ static int di_probe(struct platform_device *pdev)
                     IRQF_SHARED, "deinterlace",
                     (void *)"deinterlace");
     Wr(A9_0_IRQ_IN1_INTR_MASK, Rd(A9_0_IRQ_IN1_INTR_MASK)|(1<<14));
-    init_MUTEX(&di_sema);
+    sema_init(&di_sema, 1);
     di_sema_init_flag=1;
 #ifdef FIQ_VSYNC
 	fiq_handle_item.handle=di_vf_put_isr;

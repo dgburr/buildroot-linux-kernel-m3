@@ -105,7 +105,7 @@ static DEFINE_SPINLOCK(uart_lock);
  * memory if large numbers of serial ports are open.
  */
 //static unsigned char tmp_buf[SERIAL_XMIT_SIZE]; /* This is cheating */
-DECLARE_MUTEX(tmp_buf_sem);
+DEFINE_SEMAPHORE(tmp_buf_sem);
 
 #ifndef MIN
 #define MIN(a,b)    ((a) < (b) ? (a) : (b))

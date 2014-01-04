@@ -2520,8 +2520,6 @@ static __init void m1_fixup(struct machine_desc *mach, struct tag *tag, char **c
 }
 
 MACHINE_START(MESON3_8726M_SKT, "AMLOGIC MESON3 8726M SKT SH")
-    .phys_io        = MESON_PERIPHS1_PHYS_BASE,
-    .io_pg_offst    = (MESON_PERIPHS1_PHYS_BASE >> 18) & 0xfffc,
     .boot_params    = BOOT_PARAMS_OFFSET,
     .map_io         = m1_map_io,
     .init_irq       = m1_irq_init,

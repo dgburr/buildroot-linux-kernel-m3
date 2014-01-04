@@ -190,7 +190,7 @@ static int gen_ndis_query_resp(int configNr, u32 OID, u8 *buf,
 	rndis_query_cmplt_type *resp;
 	struct net_device *net;
 	struct rtnl_link_stats64 temp;
-	struct rtnl_link_stats64 *stats = &temp;
+	const struct rtnl_link_stats64 *stats;
 
 	if (!r) return -ENOMEM;
 	resp = (rndis_query_cmplt_type *)r->buf;

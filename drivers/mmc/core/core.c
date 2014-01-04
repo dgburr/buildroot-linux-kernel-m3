@@ -1471,10 +1471,10 @@ void mmc_rescan(struct work_struct *work)
 		container_of(work, struct mmc_host, detect.work);
 	u32 ocr;
 	int err;
-	int extend_wakelock = 0;
 	unsigned long flags;
 	int i;
 	const unsigned freqs[] = { 400000, 300000, 200000, 100000 };
+	int extend_wakelock = 0;
 
 	spin_lock_irqsave(&host->lock, flags);
 
