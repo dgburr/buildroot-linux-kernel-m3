@@ -46,6 +46,11 @@ SECTIONS
 		__tagtable_begin = .;
 			*(.taglist.init)
 		__tagtable_end = .;
+#ifdef CONFIG_SMP_ON_UP
+		__smpalt_begin = .;
+			*(.alt.smp.init)
+		__smpalt_end = .;
+#endif
 
 		INIT_SETUP(16)
 
@@ -112,8 +117,6 @@ SECTIONS
 	
 	NOTES :text :note
 
-	_etext = .;			/* End of text and rodata section */
-
 #ifdef CONFIG_ARM_UNWIND
 	/*
 	 * Stack unwinding tables
@@ -130,6 +133,8 @@ SECTIONS
 		__stop_unwind_tab = .;
 	} :text
 #endif
+
+	_etext = .;			/* End of text and rodata section */
 
 #ifdef CONFIG_XIP_KERNEL
 	__data_loc = ALIGN(4);		/* location in binary */
@@ -245,6 +250,12 @@ SECTIONS
 
 	/* Default discards */
 	DISCARDS
+
+#ifndef CONFIG_SMP_ON_UP
+	/DISCARD/ : {
+		*(.alt.smp.init)
+	}
+#endif
 }
 
 /*
