@@ -210,7 +210,7 @@ MODULE_PARM_DESC(allowOverlap,
     "\n\t\t allocated to kernel physical mem (via mem=xxx)");
 module_param(allowOverlap, int, S_IRUGO);
 
-static DECLARE_MUTEX(cmem_mutex);
+static DEFINE_SEMAPHORE(cmem_mutex);
 
 /* Describes a pool buffer */
 typedef struct pool_buffer {

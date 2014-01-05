@@ -81,7 +81,7 @@ static int inited_ports_flag = 0;
 #define clear_mask(addr,mask)		out_l(in_l(addr) &(~(mask)),addr)
 #define set_mask(addr,mask)		out_l(in_l(addr) |(mask),addr)
 
-DECLARE_MUTEX(tmp_buf_sem);
+DEFINE_SEMAPHORE(tmp_buf_sem);
 #ifndef MIN
 #define MIN(a,b)	((a) < (b) ? (a) : (b))
 #endif
