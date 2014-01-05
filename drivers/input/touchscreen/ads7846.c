@@ -844,17 +844,18 @@ static void ads7846_report_state(struct ads7846 *ts)
 		if (ts->swap_xy)
 			swap(x, y);
 
+		if (ts->convert) {
+		    int xy = ts->convert(x, y);
+		    x = xy >> 16;
+		    y = xy & 0xffff;
+		}
+
 		if (!ts->pendown) {
 			input_report_key(input, BTN_TOUCH, 1);
 			ts->pendown = true;
 			dev_vdbg(&ts->spi->dev, "DOWN\n");
 		}
 
-		if (ts->convert) {
-		    int xy = ts->convert(x, y);
-		    x = xy >> 16;
-		    y = xy & 0xffff;
-		}
 		input_report_abs(input, ABS_X, x);
 		input_report_abs(input, ABS_Y, y);
 		input_report_abs(input, ABS_PRESSURE, ts->pressure_max - Rt);
@@ -909,8 +910,8 @@ static int ads7846_suspend(struct spi_device *spi, pm_message_t message)
 {
 	struct ads7846 *ts = dev_get_drvdata(&spi->dev);
 
-    if (ts->suspend_flag)
-        return 0;
+	if (ts->suspend_flag)
+		return 0;
 
 	mutex_lock(&ts->lock);
 
@@ -927,9 +928,8 @@ static int ads7846_suspend(struct spi_device *spi, pm_message_t message)
 
 	mutex_unlock(&ts->lock);
 
-    ts->suspend_flag = 1;
-    printk("touch_suspend\n");
-
+	ts->suspend_flag = 1;
+	printk("touch_suspend\n");
 	return 0;
 }
 
@@ -937,8 +937,8 @@ static int ads7846_resume(struct spi_device *spi)
 {
 	struct ads7846 *ts = dev_get_drvdata(&spi->dev);
 
-    if (!ts->suspend_flag)
-        return 0;
+	if (!ts->suspend_flag)
+		return 0;
 
 	mutex_lock(&ts->lock);
 
@@ -955,10 +955,15 @@ static int ads7846_resume(struct spi_device *spi)
 
 	mutex_unlock(&ts->lock);
 
-    ts->suspend_flag = 0;
-    printk("touch_resume\n");
-
+	ts->suspend_flag = 0;
+	printk("touch_resume\n");
 	return 0;
+}
+
+#ifdef CONFIG_HAS_EARLYSUSPEND
+static void ads7846_early_suspend(struct early_suspend *h)
+{
+    ads7846_suspend((struct spi_device *)h->param, PMSG_SUSPEND);
 }
 
 static void ads7846_late_resume(struct early_suspend *h)
@@ -966,12 +971,6 @@ static void ads7846_late_resume(struct early_suspend *h)
     ads7846_resume((struct spi_device *)h->param);
 }
 #endif
-
-#ifdef CONFIG_HAS_EARLYSUSPEND
-static void ads7846_early_suspend(struct early_suspend *h)
-{
-    ads7846_suspend((struct spi_device *)h->param, PMSG_SUSPEND);
-}
 
 static int __devinit ads7846_setup_pendown(struct spi_device *spi, struct ads7846 *ts)
 {
@@ -1385,7 +1384,7 @@ static int __devinit ads7846_probe(struct spi_device *spi)
 #endif
 
 	device_init_wakeup(&spi->dev, pdata->wakeup);
-
+	printk(KERN_INFO "ads7846 probe ok\n");	
 	return 0;
 
  err_remove_attr_group:
@@ -1408,6 +1407,7 @@ static int __devinit ads7846_probe(struct spi_device *spi)
 	input_free_device(input_dev);
 	kfree(packet);
 	kfree(ts);
+	printk(KERN_INFO "ads7846 probe error\n");	
 	return err;
 }
 
@@ -1423,7 +1423,7 @@ static int __devexit ads7846_remove(struct spi_device *spi)
 	free_irq(ts->spi->irq, ts);
 
 #ifdef CONFIG_HAS_EARLYSUSPEND
-    unregister_early_suspend(&ts->early_suspend);
+	unregister_early_suspend(&ts->early_suspend);
 #endif
 
 	input_unregister_device(ts->input);
