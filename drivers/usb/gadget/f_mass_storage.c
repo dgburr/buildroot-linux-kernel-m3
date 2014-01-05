@@ -316,6 +316,139 @@ static const char fsg_string_interface[] = "Mass Storage";
 
 /*-------------------------------------------------------------------------*/
 
+<<<<<<< HEAD
+=======
+struct fsg_dev;
+struct fsg_common;
+
+/* FSF callback functions */
+struct fsg_operations {
+	/* Callback function to call when thread exits.  If no
+	 * callback is set or it returns value lower then zero MSF
+	 * will force eject all LUNs it operates on (including those
+	 * marked as non-removable or with prevent_medium_removal flag
+	 * set). */
+	int (*thread_exits)(struct fsg_common *common);
+
+	/* Called prior to ejection.  Negative return means error,
+	 * zero means to continue with ejection, positive means not to
+	 * eject. */
+	int (*pre_eject)(struct fsg_common *common,
+			 struct fsg_lun *lun, int num);
+	/* Called after ejection.  Negative return means error, zero
+	 * or positive is just a success. */
+	int (*post_eject)(struct fsg_common *common,
+			  struct fsg_lun *lun, int num);
+};
+
+
+/* Data shared by all the FSG instances. */
+struct fsg_common {
+	struct usb_gadget	*gadget;
+	struct fsg_dev		*fsg, *new_fsg;
+	wait_queue_head_t	fsg_wait;
+
+	/* filesem protects: backing files in use */
+	struct rw_semaphore	filesem;
+
+	/* lock protects: state, all the req_busy's */
+	spinlock_t		lock;
+
+	struct usb_ep		*ep0;		/* Copy of gadget->ep0 */
+	struct usb_request	*ep0req;	/* Copy of cdev->req */
+	unsigned int		ep0_req_tag;
+
+	struct fsg_buffhd	*next_buffhd_to_fill;
+	struct fsg_buffhd	*next_buffhd_to_drain;
+	struct fsg_buffhd	buffhds[FSG_NUM_BUFFERS];
+
+	int			cmnd_size;
+	u8			cmnd[MAX_COMMAND_SIZE];
+
+	unsigned int		nluns;
+	unsigned int		lun;
+	struct fsg_lun		*luns;
+	struct fsg_lun		*curlun;
+
+	unsigned int		bulk_out_maxpacket;
+	enum fsg_state		state;		/* For exception handling */
+	unsigned int		exception_req_tag;
+
+	enum data_direction	data_dir;
+	u32			data_size;
+	u32			data_size_from_cmnd;
+	u32			tag;
+	u32			residue;
+	u32			usb_amount_left;
+
+	unsigned int		can_stall:1;
+	unsigned int		free_storage_on_release:1;
+	unsigned int		phase_error:1;
+	unsigned int		short_packet_received:1;
+	unsigned int		bad_lun_okay:1;
+	unsigned int		running:1;
+
+	int			thread_wakeup_needed;
+	struct completion	thread_notifier;
+	struct task_struct	*thread_task;
+
+	/* Callback functions. */
+	const struct fsg_operations	*ops;
+	/* Gadget's private data. */
+	void			*private_data;
+
+	/* Vendor (8 chars), product (16 chars), release (4
+	 * hexadecimal digits) and NUL byte */
+	char inquiry_string[8 + 16 + 4 + 1];
+
+	struct kref		ref;
+};
+
+
+struct fsg_config {
+	unsigned nluns;
+	struct fsg_lun_config {
+		const char *filename;
+		char ro;
+		char removable;
+		char cdrom;
+		char nofua;
+	} luns[FSG_MAX_LUNS];
+
+	const char		*lun_name_format;
+	const char		*thread_name;
+
+	/* Callback functions. */
+	const struct fsg_operations	*ops;
+	/* Gadget's private data. */
+	void			*private_data;
+
+	const char *vendor_name;		/*  8 characters or less */
+	const char *product_name;		/* 16 characters or less */
+	u16 release;
+
+	char			can_stall;
+};
+
+
+struct fsg_dev {
+	struct usb_function	function;
+	struct usb_gadget	*gadget;	/* Copy of cdev->gadget */
+	struct fsg_common	*common;
+
+	u16			interface_number;
+
+	unsigned int		bulk_in_enabled:1;
+	unsigned int		bulk_out_enabled:1;
+
+	unsigned long		atomic_bitflags;
+#define IGNORE_BULK_OUT		0
+
+	struct usb_ep		*bulk_in;
+	struct usb_ep		*bulk_out;
+};
+
+>>>>>>> c8ddb2713c624f432fa5fe3c7ecffcdda46ea0d4
 
 static inline int __fsg_is_set(struct fsg_common *common,
 			       const char *func, unsigned line)
@@ -614,10 +747,15 @@ static int do_read(struct fsg_common *common)
 	unsigned int		partial_page;
 	ssize_t			nread;
 
+<<<<<<< HEAD
 	/*
 	 * Get the starting Logical Block Address and check that it's
 	 * not too big.
 	 */
+=======
+	/* Get the starting Logical Block Address and check that it's
+	 * not too big */
+>>>>>>> c8ddb2713c624f432fa5fe3c7ecffcdda46ea0d4
 	if (common->cmnd[0] == READ_6)
 		lba = get_unaligned_be24(&common->cmnd[1]);
 	else {
@@ -757,10 +895,15 @@ static int do_write(struct fsg_common *common)
 		curlun->filp->f_flags |= O_SYNC;
 	spin_unlock(&curlun->filp->f_lock);
 
+<<<<<<< HEAD
 	/*
 	 * Get the starting Logical Block Address and check that it's
 	 * not too big
 	 */
+=======
+	/* Get the starting Logical Block Address and check that it's
+	 * not too big */
+>>>>>>> c8ddb2713c624f432fa5fe3c7ecffcdda46ea0d4
 	if (common->cmnd[0] == WRITE_6)
 		lba = get_unaligned_be24(&common->cmnd[1]);
 	else {
@@ -1765,10 +1908,15 @@ static int check_command(struct fsg_common *common, int cmnd_size,
 		curlun = NULL;
 		common->bad_lun_okay = 0;
 
+<<<<<<< HEAD
 		/*
 		 * INQUIRY and REQUEST SENSE commands are explicitly allowed
 		 * to use unsupported LUNs; all others may not.
 		 */
+=======
+		/* INQUIRY and REQUEST SENSE commands are explicitly allowed
+		 * to use unsupported LUNs; all others may not. */
+>>>>>>> c8ddb2713c624f432fa5fe3c7ecffcdda46ea0d4
 		if (common->cmnd[0] != INQUIRY &&
 		    common->cmnd[0] != REQUEST_SENSE) {
 			DBG(common, "unsupported LUN %d\n", common->lun);
@@ -1781,8 +1929,13 @@ static int check_command(struct fsg_common *common, int cmnd_size,
 	 * REQUEST SENSE commands are allowed; anything else must fail.
 	 */
 	if (curlun && curlun->unit_attention_data != SS_NO_SENSE &&
+<<<<<<< HEAD
 	    common->cmnd[0] != INQUIRY &&
 	    common->cmnd[0] != REQUEST_SENSE) {
+=======
+			common->cmnd[0] != INQUIRY &&
+			common->cmnd[0] != REQUEST_SENSE) {
+>>>>>>> c8ddb2713c624f432fa5fe3c7ecffcdda46ea0d4
 		curlun->sense_data = curlun->unit_attention_data;
 		curlun->unit_attention_data = SS_NO_SENSE;
 		return -EINVAL;
@@ -1995,10 +2148,15 @@ static int do_scsi_command(struct fsg_common *common)
 				"TEST UNIT READY");
 		break;
 
+<<<<<<< HEAD
 	/*
 	 * Although optional, this command is used by MS-Windows.  We
 	 * support a minimal version: BytChk must be 0.
 	 */
+=======
+	/* Although optional, this command is used by MS-Windows.  We
+	 * support a minimal version: BytChk must be 0. */
+>>>>>>> c8ddb2713c624f432fa5fe3c7ecffcdda46ea0d4
 	case VERIFY:
 		common->data_size_from_cmnd = 0;
 		reply = check_command(common, 10, DATA_DIR_NONE,
@@ -2042,8 +2200,12 @@ static int do_scsi_command(struct fsg_common *common)
 	 * Some mandatory commands that we recognize but don't implement.
 	 * They don't mean much in this setting.  It's left as an exercise
 	 * for anyone interested to implement RESERVE and RELEASE in terms
+<<<<<<< HEAD
 	 * of Posix locks.
 	 */
+=======
+	 * of Posix locks. */
+>>>>>>> c8ddb2713c624f432fa5fe3c7ecffcdda46ea0d4
 	case FORMAT_UNIT:
 	case RELEASE:
 	case RESERVE:
@@ -2681,9 +2843,12 @@ static struct fsg_common *fsg_common_init(struct fsg_common *common,
 		rc = device_create_file(&curlun->dev, &dev_attr_nofua);
 		if (rc)
 			goto error_luns;
+<<<<<<< HEAD
 		rc = device_create_file(&curlun->dev, &dev_attr_force_sync);
 		if (rc)
 			goto error_luns;	
+=======
+>>>>>>> c8ddb2713c624f432fa5fe3c7ecffcdda46ea0d4
 
 		if (lcfg->filename) {
 			rc = fsg_lun_open(common, curlun, lcfg->filename);
@@ -2980,11 +3145,17 @@ struct fsg_module_parameters {
 	int		removable[FSG_MAX_LUNS];
 	int		cdrom[FSG_MAX_LUNS];
 	int		nofua[FSG_MAX_LUNS];
+<<<<<<< HEAD
   int		force_sync[FSG_MAX_LUNS];
   
 	unsigned int	file_count, ro_count, removable_count, cdrom_count;
 	unsigned int	nofua_count;
 	unsigned int  force_sync_count;
+=======
+
+	unsigned int	file_count, ro_count, removable_count, cdrom_count;
+	unsigned int	nofua_count;
+>>>>>>> c8ddb2713c624f432fa5fe3c7ecffcdda46ea0d4
 	unsigned int	luns;	/* nluns */
 	int		stall;	/* can_stall */
 };

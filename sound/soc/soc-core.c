@@ -3,6 +3,8 @@
  *
  * Copyright 2005 Wolfson Microelectronics PLC.
  * Copyright 2005 Openedhand Ltd.
+ * Copyright (C) 2010 Slimlogic Ltd.
+ * Copyright (C) 2010 Texas Instruments Inc.
  *
  * Author: Liam Girdwood <lrg@slimlogic.co.uk>
  *         with code, comments and ideas from :-
@@ -37,6 +39,8 @@
 #include <sound/soc-dapm.h>
 #include <sound/initval.h>
 
+#define NAME_SIZE	32
+
 static DEFINE_MUTEX(pcm_mutex);
 static DECLARE_WAIT_QUEUE_HEAD(soc_pm_waitq);
 
@@ -52,6 +56,7 @@ static LIST_HEAD(codec_list);
 
 static int snd_soc_register_card(struct snd_soc_card *card);
 static int snd_soc_unregister_card(struct snd_soc_card *card);
+static int soc_new_pcm(struct snd_soc_pcm_runtime *rtd, int num);
 
 /*
  * This is a timeout to do a DAPM powerdown after a stream is closed().
@@ -86,30 +91,30 @@ static ssize_t soc_codec_reg_show(struct snd_soc_codec *codec, char *buf)
 {
 	int ret, i, step = 1, count = 0;
 
-	if (!codec->reg_cache_size)
+	if (!codec->driver->reg_cache_size)
 		return 0;
 
-	if (codec->reg_cache_step)
-		step = codec->reg_cache_step;
+	if (codec->driver->reg_cache_step)
+		step = codec->driver->reg_cache_step;
 
 	count += sprintf(buf, "%s registers\n", codec->name);
-	for (i = 0; i < codec->reg_cache_size; i += step) {
-		if (codec->readable_register && !codec->readable_register(i))
+	for (i = 0; i < codec->driver->reg_cache_size; i += step) {
+		if (codec->driver->readable_register && !codec->driver->readable_register(i))
 			continue;
 
 		count += sprintf(buf + count, "%2x: ", i);
 		if (count >= PAGE_SIZE - 1)
 			break;
 
-		if (codec->display_register) {
-			count += codec->display_register(codec, buf + count,
+		if (codec->driver->display_register) {
+			count += codec->driver->display_register(codec, buf + count,
 							 PAGE_SIZE - count, i);
 		} else {
 			/* If the read fails it's almost certainly due to
 			 * the register being volatile and the device being
 			 * powered off.
 			 */
-			ret = codec->read(codec, i);
+			ret = codec->driver->read(codec, i);
 			if (ret >= 0)
 				count += snprintf(buf + count,
 						  PAGE_SIZE - count,
@@ -141,61 +146,25 @@ static ssize_t codec_reg_show(struct device *dev,
 	return soc_codec_reg_show(devdata->card->codec, buf);
 }
 
-/*
- * echo value reg > sys/devices/platform/soc-audio/codec_reg
- */
-
-static ssize_t codec_reg_write(struct device *dev,
-    struct device_attribute* attr, const char* buf, size_t count)
-{
-  struct snd_soc_device *socdev = dev_get_drvdata(dev);
-  struct snd_soc_card *card = socdev->card;
-  struct snd_soc_codec *codec = card->codec;
-  char *start = buf;
-  unsigned long reg, value;
-  int step = 1;
-  
-  if (codec->reg_cache_step)
-  	step = codec->reg_cache_step;
-  
-  while (*start == ' ')
-  	start++;
-  reg = simple_strtoul(start, &start, 16);
-  if ((reg >= codec->reg_cache_size) || (reg % step)){
-    printk("error 2: %x\n", reg);
-  	return -EINVAL;
-  }
-  while (*start == ' ')
-  	start++;
-  if (strict_strtoul(start, 16, &value)){
-    printk("error 3: %x\n", value);
-  	return -EINVAL;
-  }
-	
-  printk("write reg: %x, val: %x\n", reg, value);
-  codec->write(codec, reg, value);
-  return count;
-}
-
-static DEVICE_ATTR(codec_reg, 0664, codec_reg_show, codec_reg_write);
+static DEVICE_ATTR(codec_reg, 0444, codec_reg_show, NULL);
 
 static ssize_t pmdown_time_show(struct device *dev,
 				struct device_attribute *attr, char *buf)
 {
-	struct snd_soc_device *socdev = dev_get_drvdata(dev);
-	struct snd_soc_card *card = socdev->card;
+	struct snd_soc_pcm_runtime *rtd =
+			container_of(dev, struct snd_soc_pcm_runtime, dev);
 
-	return sprintf(buf, "%ld\n", card->pmdown_time);
+	return sprintf(buf, "%ld\n", rtd->pmdown_time);
 }
 
 static ssize_t pmdown_time_set(struct device *dev,
 			       struct device_attribute *attr,
 			       const char *buf, size_t count)
 {
-	struct snd_soc_device *socdev = dev_get_drvdata(dev);
-	struct snd_soc_card *card = socdev->card;
+	struct snd_soc_pcm_runtime *rtd =
+			container_of(dev, struct snd_soc_pcm_runtime, dev);
 
-	strict_strtol(buf, 10, &card->pmdown_time);
+	strict_strtol(buf, 10, &rtd->pmdown_time);
 
 	return count;
 }
@@ -239,21 +208,19 @@ static ssize_t codec_reg_write_file(struct file *file,
 		return -EFAULT;
 	buf[buf_size] = 0;
 
-	if (codec->reg_cache_step)
-		step = codec->reg_cache_step;
+	if (codec->driver->reg_cache_step)
+		step = codec->driver->reg_cache_step;
 
 	while (*start == ' ')
 		start++;
 	reg = simple_strtoul(start, &start, 16);
-	if ((reg >= codec->reg_cache_size) || (reg % step))
+	if ((reg >= codec->driver->reg_cache_size) || (reg % step))
 		return -EINVAL;
 	while (*start == ' ')
 		start++;
 	if (strict_strtoul(start, 16, &value))
 		return -EINVAL;
-	
-	printk("write reg: %x, val: %x\n", reg, value);
-	codec->write(codec, reg, value);
+	codec->driver->write(codec, reg, value);
 	return buf_size;
 }
 
@@ -266,16 +233,7 @@ static const struct file_operations codec_reg_fops = {
 
 static void soc_init_codec_debugfs(struct snd_soc_codec *codec)
 {
-	char codec_root[128];
-
-	if (codec->dev)
-		snprintf(codec_root, sizeof(codec_root),
-			"%s.%s", codec->name, dev_name(codec->dev));
-	else
-		snprintf(codec_root, sizeof(codec_root),
-			"%s", codec->name);
-
-	codec->debugfs_codec_root = debugfs_create_dir(codec_root,
+	codec->debugfs_codec_root = debugfs_create_dir(codec->name ,
 						       debugfs_root);
 	if (!codec->debugfs_codec_root) {
 		printk(KERN_WARNING
@@ -311,6 +269,106 @@ static void soc_cleanup_codec_debugfs(struct snd_soc_codec *codec)
 	debugfs_remove_recursive(codec->debugfs_codec_root);
 }
 
+static ssize_t codec_list_read_file(struct file *file, char __user *user_buf,
+				    size_t count, loff_t *ppos)
+{
+	char *buf = kmalloc(PAGE_SIZE, GFP_KERNEL);
+	ssize_t len, ret = 0;
+	struct snd_soc_codec *codec;
+
+	if (!buf)
+		return -ENOMEM;
+
+	list_for_each_entry(codec, &codec_list, list) {
+		len = snprintf(buf + ret, PAGE_SIZE - ret, "%s\n",
+			       codec->name);
+		if (len >= 0)
+			ret += len;
+		if (ret > PAGE_SIZE) {
+			ret = PAGE_SIZE;
+			break;
+		}
+	}
+
+	if (ret >= 0)
+		ret = simple_read_from_buffer(user_buf, count, ppos, buf, ret);
+
+	kfree(buf);
+
+	return ret;
+}
+
+static const struct file_operations codec_list_fops = {
+	.read = codec_list_read_file,
+	.llseek = default_llseek,/* read accesses f_pos */
+};
+
+static ssize_t dai_list_read_file(struct file *file, char __user *user_buf,
+				  size_t count, loff_t *ppos)
+{
+	char *buf = kmalloc(PAGE_SIZE, GFP_KERNEL);
+	ssize_t len, ret = 0;
+	struct snd_soc_dai *dai;
+
+	if (!buf)
+		return -ENOMEM;
+
+	list_for_each_entry(dai, &dai_list, list) {
+		len = snprintf(buf + ret, PAGE_SIZE - ret, "%s\n", dai->name);
+		if (len >= 0)
+			ret += len;
+		if (ret > PAGE_SIZE) {
+			ret = PAGE_SIZE;
+			break;
+		}
+	}
+
+	ret = simple_read_from_buffer(user_buf, count, ppos, buf, ret);
+
+	kfree(buf);
+
+	return ret;
+}
+
+static const struct file_operations dai_list_fops = {
+	.read = dai_list_read_file,
+	.llseek = default_llseek,/* read accesses f_pos */
+};
+
+static ssize_t platform_list_read_file(struct file *file,
+				       char __user *user_buf,
+				       size_t count, loff_t *ppos)
+{
+	char *buf = kmalloc(PAGE_SIZE, GFP_KERNEL);
+	ssize_t len, ret = 0;
+	struct snd_soc_platform *platform;
+
+	if (!buf)
+		return -ENOMEM;
+
+	list_for_each_entry(platform, &platform_list, list) {
+		len = snprintf(buf + ret, PAGE_SIZE - ret, "%s\n",
+			       platform->name);
+		if (len >= 0)
+			ret += len;
+		if (ret > PAGE_SIZE) {
+			ret = PAGE_SIZE;
+			break;
+		}
+	}
+
+	ret = simple_read_from_buffer(user_buf, count, ppos, buf, ret);
+
+	kfree(buf);
+
+	return ret;
+}
+
+static const struct file_operations platform_list_fops = {
+	.read = platform_list_read_file,
+	.llseek = default_llseek,/* read accesses f_pos */
+};
+
 #else
 
 static inline void soc_init_codec_debugfs(struct snd_soc_codec *codec)
@@ -344,7 +402,7 @@ static int soc_ac97_dev_register(struct snd_soc_codec *codec)
 	codec->ac97->dev.release = soc_ac97_device_release;
 
 	dev_set_name(&codec->ac97->dev, "%d-%d:%s",
-		     codec->card->number, 0, codec->name);
+		     codec->card->snd_card->number, 0, codec->name);
 	err = device_register(&codec->ac97->dev);
 	if (err < 0) {
 		snd_printk(KERN_ERR "Can't register ac97 bus\n");
@@ -358,24 +416,21 @@ static int soc_ac97_dev_register(struct snd_soc_codec *codec)
 static int soc_pcm_apply_symmetry(struct snd_pcm_substream *substream)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_device *socdev = rtd->socdev;
-	struct snd_soc_card *card = socdev->card;
-	struct snd_soc_dai_link *machine = rtd->dai;
-	struct snd_soc_dai *cpu_dai = machine->cpu_dai;
-	struct snd_soc_dai *codec_dai = machine->codec_dai;
+	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
+	struct snd_soc_dai *codec_dai = rtd->codec_dai;
 	int ret;
 
-	if (codec_dai->symmetric_rates || cpu_dai->symmetric_rates ||
-	    machine->symmetric_rates) {
-		dev_dbg(card->dev, "Symmetry forces %dHz rate\n",
-			machine->rate);
+	if (codec_dai->driver->symmetric_rates || cpu_dai->driver->symmetric_rates ||
+			rtd->dai_link->symmetric_rates) {
+		dev_dbg(&rtd->dev, "Symmetry forces %dHz rate\n",
+				rtd->rate);
 
 		ret = snd_pcm_hw_constraint_minmax(substream->runtime,
 						   SNDRV_PCM_HW_PARAM_RATE,
-						   machine->rate,
-						   machine->rate);
+						   rtd->rate,
+						   rtd->rate);
 		if (ret < 0) {
-			dev_err(card->dev,
+			dev_err(&rtd->dev,
 				"Unable to apply rate symmetry constraint: %d\n", ret);
 			return ret;
 		}
@@ -392,20 +447,19 @@ static int soc_pcm_apply_symmetry(struct snd_pcm_substream *substream)
 static int soc_pcm_open(struct snd_pcm_substream *substream)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_device *socdev = rtd->socdev;
-	struct snd_soc_card *card = socdev->card;
 	struct snd_pcm_runtime *runtime = substream->runtime;
-	struct snd_soc_dai_link *machine = rtd->dai;
-	struct snd_soc_platform *platform = card->platform;
-	struct snd_soc_dai *cpu_dai = machine->cpu_dai;
-	struct snd_soc_dai *codec_dai = machine->codec_dai;
+	struct snd_soc_platform *platform = rtd->platform;
+	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
+	struct snd_soc_dai *codec_dai = rtd->codec_dai;
+	struct snd_soc_dai_driver *cpu_dai_drv = cpu_dai->driver;
+	struct snd_soc_dai_driver *codec_dai_drv = codec_dai->driver;
 	int ret = 0;
 
 	mutex_lock(&pcm_mutex);
 
 	/* startup the audio subsystem */
-	if (cpu_dai->ops->startup) {
-		ret = cpu_dai->ops->startup(substream, cpu_dai);
+	if (cpu_dai->driver->ops->startup) {
+		ret = cpu_dai->driver->ops->startup(substream, cpu_dai);
 		if (ret < 0) {
 			printk(KERN_ERR "asoc: can't open interface %s\n",
 				cpu_dai->name);
@@ -413,16 +467,16 @@ static int soc_pcm_open(struct snd_pcm_substream *substream)
 		}
 	}
 
-	if (platform->pcm_ops->open) {
-		ret = platform->pcm_ops->open(substream);
+	if (platform->driver->ops->open) {
+		ret = platform->driver->ops->open(substream);
 		if (ret < 0) {
 			printk(KERN_ERR "asoc: can't open platform %s\n", platform->name);
 			goto platform_err;
 		}
 	}
 
-	if (codec_dai->ops->startup) {
-		ret = codec_dai->ops->startup(substream, codec_dai);
+	if (codec_dai->driver->ops->startup) {
+		ret = codec_dai->driver->ops->startup(substream, codec_dai);
 		if (ret < 0) {
 			printk(KERN_ERR "asoc: can't open codec %s\n",
 				codec_dai->name);
@@ -430,10 +484,10 @@ static int soc_pcm_open(struct snd_pcm_substream *substream)
 		}
 	}
 
-	if (machine->ops && machine->ops->startup) {
-		ret = machine->ops->startup(substream);
+	if (rtd->dai_link->ops && rtd->dai_link->ops->startup) {
+		ret = rtd->dai_link->ops->startup(substream);
 		if (ret < 0) {
-			printk(KERN_ERR "asoc: %s startup failed\n", machine->name);
+			printk(KERN_ERR "asoc: %s startup failed\n", rtd->dai_link->name);
 			goto machine_err;
 		}
 	}
@@ -441,50 +495,50 @@ static int soc_pcm_open(struct snd_pcm_substream *substream)
 	/* Check that the codec and cpu DAI's are compatible */
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
 		runtime->hw.rate_min =
-			max(codec_dai->playback.rate_min,
-			    cpu_dai->playback.rate_min);
+			max(codec_dai_drv->playback.rate_min,
+			    cpu_dai_drv->playback.rate_min);
 		runtime->hw.rate_max =
-			min(codec_dai->playback.rate_max,
-			    cpu_dai->playback.rate_max);
+			min(codec_dai_drv->playback.rate_max,
+			    cpu_dai_drv->playback.rate_max);
 		runtime->hw.channels_min =
-			max(codec_dai->playback.channels_min,
-				cpu_dai->playback.channels_min);
+			max(codec_dai_drv->playback.channels_min,
+				cpu_dai_drv->playback.channels_min);
 		runtime->hw.channels_max =
-			min(codec_dai->playback.channels_max,
-				cpu_dai->playback.channels_max);
+			min(codec_dai_drv->playback.channels_max,
+				cpu_dai_drv->playback.channels_max);
 		runtime->hw.formats =
-			codec_dai->playback.formats & cpu_dai->playback.formats;
+			codec_dai_drv->playback.formats & cpu_dai_drv->playback.formats;
 		runtime->hw.rates =
-			codec_dai->playback.rates & cpu_dai->playback.rates;
-		if (codec_dai->playback.rates
+			codec_dai_drv->playback.rates & cpu_dai_drv->playback.rates;
+		if (codec_dai_drv->playback.rates
 			   & (SNDRV_PCM_RATE_KNOT | SNDRV_PCM_RATE_CONTINUOUS))
-			runtime->hw.rates |= cpu_dai->playback.rates;
-		if (cpu_dai->playback.rates
+			runtime->hw.rates |= cpu_dai_drv->playback.rates;
+		if (cpu_dai_drv->playback.rates
 			   & (SNDRV_PCM_RATE_KNOT | SNDRV_PCM_RATE_CONTINUOUS))
-			runtime->hw.rates |= codec_dai->playback.rates;
+			runtime->hw.rates |= codec_dai_drv->playback.rates;
 	} else {
 		runtime->hw.rate_min =
-			max(codec_dai->capture.rate_min,
-			    cpu_dai->capture.rate_min);
+			max(codec_dai_drv->capture.rate_min,
+			    cpu_dai_drv->capture.rate_min);
 		runtime->hw.rate_max =
-			min(codec_dai->capture.rate_max,
-			    cpu_dai->capture.rate_max);
+			min(codec_dai_drv->capture.rate_max,
+			    cpu_dai_drv->capture.rate_max);
 		runtime->hw.channels_min =
-			max(codec_dai->capture.channels_min,
-				cpu_dai->capture.channels_min);
+			max(codec_dai_drv->capture.channels_min,
+				cpu_dai_drv->capture.channels_min);
 		runtime->hw.channels_max =
-			min(codec_dai->capture.channels_max,
-				cpu_dai->capture.channels_max);
+			min(codec_dai_drv->capture.channels_max,
+				cpu_dai_drv->capture.channels_max);
 		runtime->hw.formats =
-			codec_dai->capture.formats & cpu_dai->capture.formats;
+			codec_dai_drv->capture.formats & cpu_dai_drv->capture.formats;
 		runtime->hw.rates =
-			codec_dai->capture.rates & cpu_dai->capture.rates;
-		if (codec_dai->capture.rates
+			codec_dai_drv->capture.rates & cpu_dai_drv->capture.rates;
+		if (codec_dai_drv->capture.rates
 			   & (SNDRV_PCM_RATE_KNOT | SNDRV_PCM_RATE_CONTINUOUS))
-			runtime->hw.rates |= cpu_dai->capture.rates;
-		if (cpu_dai->capture.rates
+			runtime->hw.rates |= cpu_dai_drv->capture.rates;
+		if (cpu_dai_drv->capture.rates
 			   & (SNDRV_PCM_RATE_KNOT | SNDRV_PCM_RATE_CONTINUOUS))
-			runtime->hw.rates |= codec_dai->capture.rates;
+			runtime->hw.rates |= codec_dai_drv->capture.rates;
 	}
 
 	snd_pcm_limit_hw_rates(runtime);
@@ -500,7 +554,7 @@ static int soc_pcm_open(struct snd_pcm_substream *substream)
 	}
 	if (!runtime->hw.channels_min || !runtime->hw.channels_max) {
 		printk(KERN_ERR "asoc: %s <-> %s No matching channels\n",
-			codec_dai->name, cpu_dai->name);
+				codec_dai->name, cpu_dai->name);
 		goto config_err;
 	}
 
@@ -511,7 +565,8 @@ static int soc_pcm_open(struct snd_pcm_substream *substream)
 			goto config_err;
 	}
 
-	pr_debug("asoc: %s <-> %s info:\n", codec_dai->name, cpu_dai->name);
+	pr_debug("asoc: %s <-> %s info:\n",
+			codec_dai->name, cpu_dai->name);
 	pr_debug("asoc: rate mask 0x%x\n", runtime->hw.rates);
 	pr_debug("asoc: min ch %d max ch %d\n", runtime->hw.channels_min,
 		 runtime->hw.channels_max);
@@ -519,33 +574,33 @@ static int soc_pcm_open(struct snd_pcm_substream *substream)
 		 runtime->hw.rate_max);
 
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
-		cpu_dai->playback.active++;
-		codec_dai->playback.active++;
+		cpu_dai->playback_active++;
+		codec_dai->playback_active++;
 	} else {
-		cpu_dai->capture.active++;
-		codec_dai->capture.active++;
+		cpu_dai->capture_active++;
+		codec_dai->capture_active++;
 	}
 	cpu_dai->active++;
 	codec_dai->active++;
-	card->codec->active++;
+	rtd->codec->active++;
 	mutex_unlock(&pcm_mutex);
 	return 0;
 
 config_err:
-	if (machine->ops && machine->ops->shutdown)
-		machine->ops->shutdown(substream);
+	if (rtd->dai_link->ops && rtd->dai_link->ops->shutdown)
+		rtd->dai_link->ops->shutdown(substream);
 
 machine_err:
-	if (codec_dai->ops->shutdown)
-		codec_dai->ops->shutdown(substream, codec_dai);
+	if (codec_dai->driver->ops->shutdown)
+		codec_dai->driver->ops->shutdown(substream, codec_dai);
 
 codec_dai_err:
-	if (platform->pcm_ops->close)
-		platform->pcm_ops->close(substream);
+	if (platform->driver->ops->close)
+		platform->driver->ops->close(substream);
 
 platform_err:
-	if (cpu_dai->ops->shutdown)
-		cpu_dai->ops->shutdown(substream, cpu_dai);
+	if (cpu_dai->driver->ops->shutdown)
+		cpu_dai->driver->ops->shutdown(substream, cpu_dai);
 out:
 	mutex_unlock(&pcm_mutex);
 	return ret;
@@ -554,33 +609,29 @@ out:
 /*
  * Power down the audio subsystem pmdown_time msecs after close is called.
  * This is to ensure there are no pops or clicks in between any music tracks
- * due to DAPM power cycling.
+ * due to DAPM power cycling.sound/soc/soc-core.c
  */
 static void close_delayed_work(struct work_struct *work)
 {
-	struct snd_soc_card *card = container_of(work, struct snd_soc_card,
-						 delayed_work.work);
-	struct snd_soc_codec *codec = card->codec;
-	struct snd_soc_dai *codec_dai;
-	int i;
+	struct snd_soc_pcm_runtime *rtd =
+			container_of(work, struct snd_soc_pcm_runtime, delayed_work.work);
+	struct snd_soc_dai *codec_dai = rtd->codec_dai;
 
 	mutex_lock(&pcm_mutex);
-	for (i = 0; i < codec->num_dai; i++) {
-		codec_dai = &codec->dai[i];
 
-		pr_debug("pop wq checking: %s status: %s waiting: %s\n",
-			 codec_dai->playback.stream_name,
-			 codec_dai->playback.active ? "active" : "inactive",
-			 codec_dai->pop_wait ? "yes" : "no");
+	pr_debug("pop wq checking: %s status: %s waiting: %s\n",
+		 codec_dai->driver->playback.stream_name,
+		 codec_dai->playback_active ? "active" : "inactive",
+		 codec_dai->pop_wait ? "yes" : "no");
 
-		/* are we waiting on this codec DAI stream */
-		if (codec_dai->pop_wait == 1) {
-			codec_dai->pop_wait = 0;
-			snd_soc_dapm_stream_event(codec,
-				codec_dai->playback.stream_name,
-				SND_SOC_DAPM_STREAM_STOP);
-		}
+	/* are we waiting on this codec DAI stream */
+	if (codec_dai->pop_wait == 1) {
+		codec_dai->pop_wait = 0;
+		snd_soc_dapm_stream_event(rtd,
+			codec_dai->driver->playback.stream_name,
+			SND_SOC_DAPM_STREAM_STOP);
 	}
+
 	mutex_unlock(&pcm_mutex);
 }
 
@@ -592,22 +643,19 @@ static void close_delayed_work(struct work_struct *work)
 static int soc_codec_close(struct snd_pcm_substream *substream)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_device *socdev = rtd->socdev;
-	struct snd_soc_card *card = socdev->card;
-	struct snd_soc_dai_link *machine = rtd->dai;
-	struct snd_soc_platform *platform = card->platform;
-	struct snd_soc_dai *cpu_dai = machine->cpu_dai;
-	struct snd_soc_dai *codec_dai = machine->codec_dai;
-	struct snd_soc_codec *codec = card->codec;
+	struct snd_soc_platform *platform = rtd->platform;
+	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
+	struct snd_soc_dai *codec_dai = rtd->codec_dai;
+	struct snd_soc_codec *codec = rtd->codec;
 
 	mutex_lock(&pcm_mutex);
 
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
-		cpu_dai->playback.active--;
-		codec_dai->playback.active--;
+		cpu_dai->playback_active--;
+		codec_dai->playback_active--;
 	} else {
-		cpu_dai->capture.active--;
-		codec_dai->capture.active--;
+		cpu_dai->capture_active--;
+		codec_dai->capture_active--;
 	}
 
 	cpu_dai->active--;
@@ -620,27 +668,28 @@ static int soc_codec_close(struct snd_pcm_substream *substream)
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
 		snd_soc_dai_digital_mute(codec_dai, 1);
 
-	if (cpu_dai->ops->shutdown)
-		cpu_dai->ops->shutdown(substream, cpu_dai);
+	if (cpu_dai->driver->ops->shutdown)
+		cpu_dai->driver->ops->shutdown(substream, cpu_dai);
 
-	if (codec_dai->ops->shutdown)
-		codec_dai->ops->shutdown(substream, codec_dai);
+	if (codec_dai->driver->ops->shutdown)
+		codec_dai->driver->ops->shutdown(substream, codec_dai);
 
-	if (machine->ops && machine->ops->shutdown)
-		machine->ops->shutdown(substream);
+	if (rtd->dai_link->ops && rtd->dai_link->ops->shutdown)
+		rtd->dai_link->ops->shutdown(substream);
 
-	if (platform->pcm_ops->close)
-		platform->pcm_ops->close(substream);
+	if (platform->driver->ops->close)
+		platform->driver->ops->close(substream);
+	cpu_dai->runtime = NULL;
 
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
 		/* start delayed pop wq here for playback streams */
 		codec_dai->pop_wait = 1;
-		schedule_delayed_work(&card->delayed_work,
-			msecs_to_jiffies(card->pmdown_time));
+		schedule_delayed_work(&rtd->delayed_work,
+			msecs_to_jiffies(rtd->pmdown_time));
 	} else {
 		/* capture streams can be powered down now */
-		snd_soc_dapm_stream_event(codec,
-			codec_dai->capture.stream_name,
+		snd_soc_dapm_stream_event(rtd,
+			codec_dai->driver->capture.stream_name,
 			SND_SOC_DAPM_STREAM_STOP);
 	}
 
