@@ -39,7 +39,7 @@ static int major;
 static unsigned long dev_use[1];
 
 #define CARD_INAND_START_MINOR		40
-#define MAX_MTD_DEVICES 32
+
 static int card_blk_issue_rq(struct card_queue *cq, struct request *req);
 static int card_blk_probe(struct memory_card *card);
 static int card_blk_prep_rq(struct card_queue *cq, struct request *req);
@@ -140,12 +140,6 @@ static int card_blk_open(struct block_device *bdev, fmode_t mode)
 			check_disk_change(bdev);
 		ret = 0;
 
-             /* 
-               * it would return -EROFS when FS/USB open card with O_RDWR. 
-               * set sd_mmc_info->write_protected_flag in func sd_mmc_check_wp
-               * set card->state |= CARD_STATE_READONLY in func sd_open
-               * set card_data->read_only = 1 in func card_blk_alloc
-               */
 		if ((mode & FMODE_WRITE) && card_data->read_only){
                              card_blk_put(bdev->bd_disk->private_data);
 			ret = -EROFS;
@@ -295,7 +289,7 @@ static int card_queue_thread(void *d)
 			q = cq->queue;
 				if (!blk_queue_plugged(q)) {
 					req = blk_fetch_request(q);
-			}
+		}
 		cq->req = req;
 		spin_unlock_irq(q->queue_lock);
 		if (!req) {
@@ -521,7 +515,7 @@ int card_init_queue(struct card_queue *cq, struct memory_card *card,
 
 
 	init_MUTEX(&cq->thread_sem);
-	cq->thread = kthread_run(card_queue_thread, cq, "%s_queue", card->name);
+	cq->thread = kthread_run(card_queue_thread, cq, "card_queue");
 	if (IS_ERR(cq->thread)) {
 		ret = PTR_ERR(cq->thread);
 		//goto free_bounce_sg;
@@ -554,7 +548,6 @@ static struct card_blk_data *card_blk_alloc(struct memory_card *card)
 
 	if(card->state & CARD_STATE_READONLY)
 		card_data->read_only = 1;
-
 	card_data->block_bits = 9;
 
 	card_data->disk = alloc_disk(1 << CARD_SHIFT);
@@ -726,6 +719,10 @@ static int card_blk_suspend(struct memory_card *card, pm_message_t state)
 	struct card_blk_data *card_data = card_get_drvdata(card);
 	struct card_host *host = card->host;
 	
+	printk("***Entered %s:%s\n", __FILE__,__func__);
+	printk("Enter %s suspend\n",card->name);
+
+
 	if (card_data) 
 	{
 		card_queue_suspend(&card_data->queue);
@@ -743,9 +740,14 @@ static int card_blk_suspend(struct memory_card *card, pm_message_t state)
 		card->card_suspend(card);
 	}
 	if(card->card_type == CARD_SDIO)
+	{
+		printk("***Exit %s:%s\n", __FILE__, __func__);
 		return 0;
-		
+	}
+	//card->unit_state = CARD_UNIT_NOT_READY;
+	//host->slot_detector = CARD_REMOVED;
 	card->unit_state = CARD_UNIT_RESUMED;
+	printk("***Exit %s:%s\n", __FILE__, __func__);
 	return 0;
 }
 
@@ -754,6 +756,9 @@ static int card_blk_resume(struct memory_card *card)
 	struct card_blk_data *card_data = card_get_drvdata(card);
 	struct card_host *host = card->host;
 	
+	printk("***Entered %s:%s\n", __FILE__,__func__);
+	printk("Enter %s resume\n",card->name);
+
 	if(card->card_resume)
 	{
 		card->card_resume(card);
@@ -774,6 +779,7 @@ static int card_blk_resume(struct memory_card *card)
 		//mmc_blk_set_blksize(md, card);
 		card_queue_resume(&card_data->queue);
 	}
+	printk("***Exit %s:%s\n", __FILE__, __func__);
 	return 0;
 }
 #else
@@ -831,125 +837,6 @@ done:
 
 #endif /* CONFIG_PROC_FS */
 
-#ifdef CONFIG_INAND_LP
-#define INAND_LAST_PART_MAJOR       202
-
-/**
- * add_last_partition : add card last partition as a full device, refer to
- * board-****.c  inand_partition_info[] last partition
- * @card: inand_card_lp
- * @size: set last partition capacity
- */
-int add_last_partition(struct memory_card* card, uint64_t offset ,uint64_t size)
-{
-      struct card_blk_data *card_data;
-      int ret;
-
-      card_data = kmalloc(sizeof(struct card_blk_data), GFP_KERNEL);
-      if (!card_data) {
-            ret = -ENOMEM;
-            return ret;
-      }
-
-      memset(card_data, 0, sizeof(struct card_blk_data));
-
-      if(card->state & CARD_STATE_READONLY)
-            card_data->read_only = 1;
-
-      card_data->block_bits = 9;
-
-      card_data->disk = alloc_disk(1 << CARD_SHIFT);
-      if (card_data->disk == NULL) {
-            ret = -ENOMEM;
-            kfree(card_data);
-            return ret;
-      }
-
-      spin_lock_init(&card_data->lock);
-      card_data->usage = 1;
-
-      ret = card_init_queue(&card_data->queue, card, &card_data->lock);
-      if (ret) {
-            put_disk(card_data->disk);
-            return ret;
-      }
-
-      card->part_offset=offset;
-      card_data->queue.prep_fn = card_blk_prep_rq;
-      card_data->queue.issue_fn = card_blk_issue_rq;
-      card_data->queue.data = card_data;
-
-      card_data->disk->major = INAND_LAST_PART_MAJOR;
-      card_data->disk->minors = 1 << CARD_SHIFT;
-      card_data->disk->first_minor = 0;
-      card_data->disk->fops = &card_ops;
-      card_data->disk->private_data = card_data;
-      card_data->disk->queue = card_data->queue.queue;
-      card_data->disk->driverfs_dev = &card->dev;
-
-      sprintf(card_data->disk->disk_name, "cardblk%s", card->name);
-
-      blk_queue_logical_block_size(card_data->queue.queue, 1 << card_data->block_bits);
-
-      set_capacity(card_data->disk, size);
-      card_set_drvdata(card, card_data);
-      add_disk(card_data->disk);
-      return 0;
-}
-
-int card_init_inand_lp(struct memory_card* card)
-{
-      struct aml_card_info *pinfo = card->card_plat_info;
-      struct mtd_partition * part = pinfo->partitions;
-      int i, err=0, nr_part = pinfo->nr_partitions;
-      uint64_t offset=0, size, cur_offset=0;
-
-      for(i=0; i<nr_part; i++)
-      {
-            if (part[i].size == MTDPART_SIZ_FULL)
-            {
-                  /*
-                  add last partition as a full device for fdisk error 22,
-                  and register a new card in bsp
-                  */
-                  if(part[i].offset == MTDPART_OFS_APPEND)
-                        size = card->capacity- cur_offset;
-                  else
-                        size = card->capacity - part[i].offset;
-                  printk("[%s] (sectors) capacity %d, offset %lld, size%lld\n",
-                                    card->name, card->capacity, offset, size);
-                  err = add_last_partition(card, cur_offset, size);
-            }
-            else{
-                  offset = part[i].offset>>9;
-                  size = part[i].size>>9;
-                  cur_offset = offset + size;
-            }
-      }
-      return err;
-}
-
-void card_remove_inand_lp(struct card_host* host)
-{
-      struct card_blk_data* card_data=card_get_drvdata(host->card);
-      del_gendisk(card_data->disk);
-      put_disk(card_data->disk);
-      card_remove_card(host->card);
-      host->card = NULL;
-}
-#else
-int card_init_inand_lp(struct memory_card* card)
-{
-      return 0;
-}
-
-void card_remove_inand_lp(struct card_host* host)
-{
-      return;
-}
-#endif
-
-
 /**
  * add_card_partition : add card partition , refer to 
  * board-****.c  inand_partition_info[]
@@ -957,11 +844,11 @@ void card_remove_inand_lp(struct card_host* host)
  * @part: partition table
  * @nr_part: partition numbers
  */
-int add_card_partition(struct gendisk * disk,
-                              struct mtd_partition * part, unsigned int nr_part)
+int add_card_partition(struct gendisk * disk, struct mtd_partition * part, 
+				unsigned int nr_part)
 {
 	unsigned int i;
-	struct hd_struct * ret=NULL;
+	struct hd_struct * ret;
 	uint64_t cur_offset=0;
 	uint64_t offset, size;
 	
@@ -974,24 +861,17 @@ int add_card_partition(struct gendisk * disk,
 		if (part[i].offset== MTDPART_OFS_APPEND)
 			offset = cur_offset;
 		if (part[i].size == MTDPART_SIZ_FULL)
-		{
 			size = disk->part0.nr_sects - offset;
-#ifdef CONFIG_INAND_LP
-			printk("[%s%d] %20s  offset 0x%012llx, len 0x%012llx %s\n",
-					disk->disk_name, 1+i, part[i].name, offset<<9, size<<9,
-					IS_ERR(ret) ? "add fail":"");
-			break;
-#endif
-		}
 		ret = add_partition(disk, 1+i, offset, size, 0);
-		printk("[%s%d] %20s  offset 0x%012llx, len 0x%012llx %s\n",
-				disk->disk_name, 1+i, part[i].name, offset<<9, size<<9,
+#ifdef  CONFIG_INAND
+		printk("[%s%d] %20s  offset 0x%012llx, len 0x%012llx %s\n", 
+				disk->disk_name, 1+i, part[i].name,offset<<9, size<<9, 
 				IS_ERR(ret) ? "add fail":"");
-
-		//if(IS_ERR(ret)){
-		//	printk("errno = %d, offset = %x, size = %x, disk->part0.nr_sects = %x\n", ret, offset, size);
-		//	return ERR_PTR(ret);
-		//}
+#else
+		printk("[%s] %20s  offset 0x%012llx, len 0x%012llx %s\n", 
+				disk->disk_name, part[i].name, offset<<9, size<<9, 
+				IS_ERR(ret) ? "add fail":"");
+#endif
 		cur_offset = offset + size;
 		
 		card_table[i] = &part[i];
