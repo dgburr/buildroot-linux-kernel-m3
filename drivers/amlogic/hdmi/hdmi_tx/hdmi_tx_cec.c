@@ -1876,7 +1876,7 @@ void cec_init(hdmitx_dev_t* hdmitx_device)
     //cec_global_info.my_node_index = CEC0_LOG_ADDR;
 
     if (cec_mutex_flag == 0) {
-        init_MUTEX(&tv_cec_sema);
+        sema_init(&tv_cec_sema, 1);
         cec_mutex_flag = 1;
     }
     

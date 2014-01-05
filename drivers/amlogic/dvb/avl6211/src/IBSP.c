@@ -98,7 +98,7 @@ AVL_DVBSx_ErrorCode AVL_DVBSx_IBSP_I2CWrite(  const struct AVL_DVBSx_Chip * pAVL
 
 AVL_DVBSx_ErrorCode AVL_DVBSx_IBSP_InitSemaphore( AVL_psemaphore pSemaphore )
 {
-	init_MUTEX(pSemaphore);
+	sema_init(pSemaphore, 1);
 	return(AVL_DVBSx_EC_OK);
 }
 

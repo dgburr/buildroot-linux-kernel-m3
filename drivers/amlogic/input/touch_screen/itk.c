@@ -985,7 +985,7 @@ static struct i2c_driver itk_driver = {
 static int __init itk_init(void)
 {
     int ret = 0;
-    init_MUTEX(&wr_sem);
+    sema_init(&wr_sem, 1);
     wr_sem.count = 1;
 
     ret = i2c_add_driver(&itk_driver);

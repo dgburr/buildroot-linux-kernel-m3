@@ -894,7 +894,7 @@ int ge2d_wq_init(void)
 	//prepare bottom half		
 	
 	spin_lock_init(&ge2d_manager.event.sem_lock);
-	init_MUTEX (&ge2d_manager.event.cmd_in_sem); 
+	sema_init(&ge2d_manager.event.cmd_in_sem, 1); 
 	init_waitqueue_head (&ge2d_manager.event.cmd_complete);
 	init_completion(&ge2d_manager.event.process_complete);
 	INIT_LIST_HEAD(&ge2d_manager.process_queue);

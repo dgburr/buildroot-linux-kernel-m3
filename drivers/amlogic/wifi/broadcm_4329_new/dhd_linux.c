@@ -2124,7 +2124,7 @@ dhd_attach(osl_t *osh, struct dhd_bus *bus, uint bus_hdrlen)
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 38))
 	mutex_init(&dhd->proto_sem);
 #else
-	init_MUTEX(&dhd->proto_sem);
+	sema_init(&dhd->proto_sem, 1);
 #endif /*  (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 31)) */
 	/* Initialize other structure content */
 	init_waitqueue_head(&dhd->ioctl_resp_wait);
@@ -2167,7 +2167,7 @@ dhd_attach(osl_t *osh, struct dhd_bus *bus, uint bus_hdrlen)
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 38))
 	mutex_init(&dhd->sdsem);
 #else
-	init_MUTEX(&dhd->sdsem);
+	sema_init(&dhd->sdsem, 1);
 #endif
 	if ((dhd_watchdog_prio >= 0) && (dhd_dpc_prio >= 0)) {
 		dhd->threads_only = TRUE;

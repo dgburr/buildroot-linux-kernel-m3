@@ -623,7 +623,7 @@ void	_rtw_mutex_init(_mutex *pmutex)
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,37))
 	mutex_init(pmutex);
 #else
-	init_MUTEX(pmutex);
+	sema_init(pmutex, 1);
 #endif
 
 #endif

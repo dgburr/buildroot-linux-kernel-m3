@@ -514,7 +514,7 @@ int card_init_queue(struct card_queue *cq, struct memory_card *card,
 	}
 
 
-	init_MUTEX(&cq->thread_sem);
+	sema_init(&cq->thread_sem, 1);
 	cq->thread = kthread_run(card_queue_thread, cq, "card_queue");
 	if (IS_ERR(cq->thread)) {
 		ret = PTR_ERR(cq->thread);
